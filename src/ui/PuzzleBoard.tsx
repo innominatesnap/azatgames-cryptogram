@@ -1,7 +1,9 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { Word } from '../engine/cipher';
 import type { SolveState } from '../engine/solve';
 import { tileCues } from '../hints/feedback';
 import { keyboardFaces, sameSpot, type TileSpot } from '../play/input';
+import { scrollDelta } from './scrollTile';
 
 export type PlayMode = 'practice' | 'live';
 
@@ -27,6 +29,37 @@ export function PuzzleBoard(props: {
   const selectedNumber = props.spot ? props.spot.number : null;
   const locked = selectedNumber !== null && Boolean(props.session.revealedLetters[selectedNumber]);
   const faces = keyboardFaces(props.session, selectedNumber);
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  const tileRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const selectedWord = props.spot ? props.spot.wordIndex : -1;
+  const selectedTile = props.spot ? props.spot.tileIndex : -1;
+
+  useLayoutEffect(() => {
+    const dock = dockRef.current;
+    if (!dock) return;
+    const apply = () => {
+      document.documentElement.style.setProperty('--keyboard-height', dock.offsetHeight + 'px');
+    };
+    apply();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(apply);
+    if (observer) observer.observe(dock);
+    window.addEventListener('resize', apply);
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', apply);
+      document.documentElement.style.removeProperty('--keyboard-height');
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const dock = dockRef.current;
+    if (!dock || selectedWord < 0) return;
+    const tile = tileRefs.current[String(selectedWord) + '-' + String(selectedTile)];
+    if (!tile) return;
+    const delta = scrollDelta(tile.getBoundingClientRect(), dock.getBoundingClientRect().top);
+    if (delta !== 0) window.scrollBy(0, delta);
+  }, [selectedWord, selectedTile]);
+
   return (
     <div data-input="onscreen-keyboard" data-renderer="PuzzleBoard">
       <div className="board">
@@ -54,6 +87,9 @@ export function PuzzleBoard(props: {
                   aria-invalid={marked || undefined}
                   title={marked ? 'This letter is wrong. Change it to clear the mark.' : undefined}
                   aria-label={tileLabel(tile.number, guess, marked, revealed, current)}
+                  ref={(node) => {
+                    tileRefs.current[String(wordIndex) + '-' + String(tileIndex)] = node;
+                  }}
                   onClick={() => props.onSelect(spot)}
                 >
                   <span className="tile-glyph">
@@ -69,7 +105,7 @@ export function PuzzleBoard(props: {
         ))}
       </div>
       {locked ? <p className="fine">Revealed letters stay locked.</p> : null}
-      <div className="keyboard-dock">
+      <div className="keyboard-dock" ref={dockRef}>
         <div className="keyboard" role="group" aria-label="Letter keyboard">
           {faces.map((face) => {
             const className = 'key'
@@ -94,10 +130,10 @@ export function PuzzleBoard(props: {
               </button>
             );
           })}
+          <button type="button" className="key key-delete" disabled={locked} onClick={props.onDelete}>
+            Delete
+          </button>
         </div>
-        <button type="button" className="key key-delete" disabled={locked} onClick={props.onDelete}>
-          Delete
-        </button>
       </div>
     </div>
   );

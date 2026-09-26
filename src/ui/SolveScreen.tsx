@@ -211,6 +211,7 @@ export function SolveScreen(props: {
 
   return (
     <Shell>
+      <div className="solve-screen">
       <div className="topbar">
         <div>
           <div className="eyebrow">{source}</div>
@@ -259,6 +260,7 @@ export function SolveScreen(props: {
         />
         <BigCard title="Give up" detail="Ask before the answer is shown." onClick={() => setGivingUp(true)} />
         <BigCard title="Back to Today" onClick={props.onHome} />
+      </div>
       </div>
       {pendingLetter ? (
         <div className="sheet-scrim">
