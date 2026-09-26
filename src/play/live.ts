@@ -2,6 +2,8 @@ import type { CryptogramClient } from '../lib/supabaseClient';
 import { countFromWords, parseCoded } from '../engine/cipher';
 import { emptySolveState, normalizeMapping, type Mapping, type SolveState } from '../engine/solve';
 import { denverDateString } from '../lib/denverDate';
+import { effectFromServer } from '../hints/serverEffect';
+import type { HintRecord } from '../hints/records';
 import type { ConfirmResult, PuzzleApi, QuoteInfo, SolveOutcome } from './api';
 
 type PublicRow = {
@@ -35,8 +37,27 @@ function quoteFrom(raw: unknown): QuoteInfo {
   };
 }
 
-function outcomeFrom(raw: unknown, dateLabel: string, letterCount: number, elapsedMs: number): SolveOutcome {
+function hintLogFrom(raw: unknown): HintRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const next: HintRecord[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { [key: string]: unknown };
+    if (typeof row.id !== 'string' || !row.id) continue;
+    next.push({ id: row.id, action: typeof row.action === 'string' ? row.action : '' });
+  }
+  return next;
+}
+
+function outcomeFrom(
+  raw: unknown,
+  dateLabel: string,
+  letterCount: number,
+  elapsedMs: number,
+  hintLog: HintRecord[],
+): SolveOutcome {
   const row = (raw || {}) as { [key: string]: unknown };
+  const serverLog = hintLogFrom(row.hintLog);
   return {
     solved: row.solved === true && row.gaveUp !== true,
     gaveUp: row.gaveUp === true,
@@ -47,6 +68,7 @@ function outcomeFrom(raw: unknown, dateLabel: string, letterCount: number, elaps
     quote: quoteFrom(row),
     dateLabel: dateLabel,
     letterCount: letterCount,
+    hintLog: serverLog.length ? serverLog : hintLog,
   };
 }
 
@@ -92,19 +114,51 @@ async function selectPublic(client: CryptogramClient, date: string) {
 export async function fetchAttempt(client: CryptogramClient, puzzleId: string): Promise<SolveState & { solved: boolean }> {
   const { data, error } = await client
     .from('attempts')
+    .select('letter_mapping, hints_used, elapsed_ms, solved, gave_up, frequency_used, revealed_numbers, hint_log, attribution_unveiled')
+    .eq('puzzle_id', puzzleId)
+    .maybeSingle();
+  if (error) {
+    if (missingHintColumns(error.message)) return fetchAttemptLegacy(client, puzzleId);
+    throw new Error(error.message);
+  }
+  if (!data) return { ...emptySolveState(), solved: false };
+  return attemptFromRow(data as { [key: string]: unknown });
+}
+
+function missingHintColumns(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.indexOf('hint_log') !== -1 || lower.indexOf('attribution_unveiled') !== -1;
+}
+
+async function fetchAttemptLegacy(client: CryptogramClient, puzzleId: string): Promise<SolveState & { solved: boolean }> {
+  const { data, error } = await client
+    .from('attempts')
     .select('letter_mapping, hints_used, elapsed_ms, solved, gave_up, frequency_used, revealed_numbers')
     .eq('puzzle_id', puzzleId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return { ...emptySolveState(), solved: false };
-  const row = data as { [key: string]: unknown };
+  return attemptFromRow(data as { [key: string]: unknown });
+}
+
+function attemptFromRow(row: { [key: string]: unknown }): SolveState & { solved: boolean } {
+  const present = normalizeMapping(row.letter_mapping);
+  const revealedNumbers = numberList(row.revealed_numbers);
+  const revealedLetters: { [number: number]: string } = {};
+  for (const number of revealedNumbers) {
+    if (present[number]) revealedLetters[number] = present[number];
+  }
   return {
     past: [],
-    present: normalizeMapping(row.letter_mapping),
+    present: present,
     future: [],
     hintsUsed: typeof row.hints_used === 'number' ? row.hints_used : 0,
+    hintLog: hintLogFrom(row.hint_log),
     frequencyShown: row.frequency_used === true,
-    revealedNumbers: numberList(row.revealed_numbers),
+    revealedNumbers: revealedNumbers,
+    revealedLetters: revealedLetters,
+    attributionUnveiled: row.attribution_unveiled === true,
+    attribution: null,
     gaveUp: row.gave_up === true,
     elapsedMs: typeof row.elapsed_ms === 'number' ? row.elapsed_ms : 0,
     solved: row.solved === true || row.gave_up === true,
@@ -120,7 +174,7 @@ export async function fetchSolvedSummary(
   const data = await rpcBody(client, 'solved_summary', { p_puzzle_id: puzzleId });
   const row = (data || {}) as { [key: string]: unknown };
   if (row.ready !== true) return null;
-  return outcomeFrom(row, dateLabel, letterCount, typeof row.elapsedMs === 'number' ? row.elapsedMs : 0);
+  return outcomeFrom(row, dateLabel, letterCount, typeof row.elapsedMs === 'number' ? row.elapsedMs : 0, hintLogFrom(row.hintLog));
 }
 
 export async function saveLiveProgress(
@@ -148,6 +202,14 @@ export function createLiveApi(
   letterCount: number,
 ): PuzzleApi {
   return {
+    async requestHint(id, state) {
+      const data = await rpcBody(client, 'request_hint', {
+        p_puzzle_id: puzzleId,
+        p_hint_type: id,
+        p_current_mapping: mappingJson(state.mapping),
+      });
+      return effectFromServer(data, id, state.hintsUsed, state.hintLog);
+    },
     async check(mapping, hintsUsed) {
       const data = await rpcBody(client, 'check_letters', {
         p_puzzle_id: puzzleId,
@@ -180,7 +242,7 @@ export function createLiveApi(
       const row = (data || {}) as { [key: string]: unknown };
       return { hintsUsed: typeof row.hintsUsed === 'number' ? row.hintsUsed : hintsUsed + 1 };
     },
-    async confirm(mapping, elapsedMs, hintsUsed) {
+    async confirm(mapping, elapsedMs, hintsUsed, hintLog) {
       void hintsUsed;
       const data = await rpcBody(client, 'confirm_solve', {
         p_puzzle_id: puzzleId,
@@ -191,17 +253,18 @@ export function createLiveApi(
       if (row.solved !== true) {
         return { solved: false, wrongCount: typeof row.wrongCount === 'number' ? row.wrongCount : 0 };
       }
-      return { solved: true, outcome: outcomeFrom(row, dateLabel, letterCount, elapsedMs) };
+      return { solved: true, outcome: outcomeFrom(row, dateLabel, letterCount, elapsedMs, hintLog) };
     },
-    async giveUp(elapsedMs, hintsUsed) {
+    async giveUp(elapsedMs, hintsUsed, hintLog) {
       const data = await rpcBody(client, 'give_up', {
         p_puzzle_id: puzzleId,
         p_elapsed_ms: elapsedMs,
       });
-      const outcome = outcomeFrom(data, dateLabel, letterCount, elapsedMs);
+      const outcome = outcomeFrom(data, dateLabel, letterCount, elapsedMs, hintLog);
       outcome.gaveUp = true;
       outcome.solved = false;
       outcome.stars = 0;
+      if (!outcome.hintLog.length) outcome.hintLog = hintLog;
       void hintsUsed;
       return outcome;
     },

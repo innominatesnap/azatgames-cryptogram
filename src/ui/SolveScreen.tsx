@@ -1,31 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Word } from '../engine/cipher';
-import { codeNumberCounts } from '../engine/frequency';
 import { firstEmptyTileIndex, nextEmptyTileIndex, wordIsFull, wordLabel } from '../engine/editor';
 import { formatDuration, parTimeMs } from '../engine/scoring';
 import {
   isFilled,
   isLetterInUseElsewhere,
+  stableMapping,
   numbersInWord,
   setLetter,
-  stableMapping,
   undo,
   redo,
   unsetNumber,
   unsetNumbers,
-  withHints,
   type SolveState,
 } from '../engine/solve';
+import { applyHintEffect } from '../hints/apply';
+import { marksAfterEdit, presentFillCheck, tileCues } from '../hints/feedback';
+import { HINT_CATALOG } from '../hints/registry';
+import { cipherNumbersInWords } from '../hints/select';
+import type { HintBoardState, HintType } from '../hints/types';
 import type { SolveOutcome } from '../play/api';
 import type { PuzzleBundle } from '../play/bundle';
+import { AttributionLine } from './AttributionLine';
 import { BigCard, ModeBanner, Shell } from './chrome';
-import { FrequencyBars } from './FrequencyBars';
+import { HintPanel } from './HintPanel';
 
 const KEY_ROWS = ['ABCDEFG', 'HIJKLMN', 'OPQRSTU', 'VWXYZ'];
 
-function offText(count: number): string {
-  if (count === 1) return 'Not quite: 1 letter is off.';
-  return 'Not quite: ' + String(count) + ' letters are off.';
+function boardState(session: SolveState, words: Word[]): HintBoardState {
+  return {
+    mapping: session.present,
+    revealedNumbers: session.revealedNumbers,
+    attributionUnveiled: session.attributionUnveiled,
+    cipherNumbers: cipherNumbersInWords(words),
+    hintLog: session.hintLog,
+    hintsUsed: session.hintsUsed,
+  };
 }
 
 export function SolveScreen(props: {
@@ -38,14 +48,15 @@ export function SolveScreen(props: {
   const { bundle } = props;
   const [session, setSession] = useState<SolveState>(bundle.initial);
   const [editor, setEditor] = useState<{ wordIndex: number; tileIndex: number } | null>(null);
-  const [revealArmed, setRevealArmed] = useState(false);
   const [givingUp, setGivingUp] = useState(false);
-  const [frequencyOpen, setFrequencyOpen] = useState(false);
-  const [flagged, setFlagged] = useState<number[]>([]);
-  const [wrongCount, setWrongCount] = useState<number | null>(null);
+  const [hintOpen, setHintOpen] = useState(false);
+  const [markedWrong, setMarkedWrong] = useState<number[]>([]);
+  const [hintNote, setHintNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const markedRef = useRef(markedWrong);
+  markedRef.current = markedWrong;
   const onDoneRef = useRef(props.onDone);
   onDoneRef.current = props.onDone;
   const onPersistRef = useRef(props.onPersist);
@@ -75,29 +86,18 @@ export function SolveScreen(props: {
   }, [bundle.key]);
 
   useEffect(() => {
-    if (!flagged.length) return;
-    const id = window.setTimeout(() => setFlagged([]), 3000);
-    return () => window.clearTimeout(id);
-  }, [flagged]);
-
-  useEffect(() => {
     if (closing.current) return;
-    if (!isFilled(bundle.words, session.present)) {
-      setWrongCount(null);
-      return;
-    }
+    if (!isFilled(bundle.words, session.present)) return;
     const key = stableMapping(session.present);
     if (checked.current === key) return;
     checked.current = key;
     let cancelled = false;
-    void bundle.api.confirm(session.present, sessionRef.current.elapsedMs, session.hintsUsed).then(
+    const current = sessionRef.current;
+    void bundle.api.confirm(session.present, current.elapsedMs, current.hintsUsed, current.hintLog).then(
       (result) => {
         if (cancelled || closing.current) return;
-        if (result.solved) {
-          finish(result.outcome);
-          return;
-        }
-        setWrongCount(result.wrongCount);
+        const shown = presentFillCheck(result);
+        if (shown.outcome) finish(shown.outcome);
       },
       (reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : 'Could not check the puzzle');
@@ -106,7 +106,20 @@ export function SolveScreen(props: {
     return () => {
       cancelled = true;
     };
-  }, [bundle, session.present, session.hintsUsed]);
+  }, [bundle, session.present]);
+
+  function stepHistory(direction: 'undo' | 'redo') {
+    const current = sessionRef.current;
+    const next = direction === 'undo' ? undo(current) : redo(current);
+    setMarkedWrong((marks) => {
+      let updated = marks;
+      for (const number of marks) {
+        updated = marksAfterEdit(updated, number, current.present[number], next.present[number]);
+      }
+      return updated;
+    });
+    setSession(next);
+  }
 
   function finish(outcome: SolveOutcome) {
     closing.current = true;
@@ -115,24 +128,25 @@ export function SolveScreen(props: {
   }
 
   function openWord(wordIndex: number, tileIndex: number) {
-    if (revealArmed) {
-      const tile = bundle.words[wordIndex].tiles[tileIndex];
-      if (tile && tile.kind === 'letter') void revealNumber(tile.number);
-      return;
-    }
     setEditor({ wordIndex: wordIndex, tileIndex: tileIndex });
     setGivingUp(false);
   }
 
-  async function revealNumber(number: number) {
+  async function runHint(hint: HintType) {
     setError(null);
+    const current = sessionRef.current;
     try {
-      const current = sessionRef.current;
-      const outcome = await bundle.api.reveal(number, current.present, current.hintsUsed, current.revealedNumbers);
-      setSession((latest) => withHints(setLetter(latest, number, outcome.letter), outcome.hintsUsed, { revealedNumber: number }));
-      setRevealArmed(false);
+      const effect = await hint.apply(boardState(current, bundle.words), {
+        request(id, state) {
+          return bundle.api.requestHint(id, state);
+        },
+      });
+      const applied = applyHintEffect(current, markedRef.current, effect);
+      setSession(applied.state);
+      setMarkedWrong(applied.marked);
+      setHintNote(applied.note);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not reveal a letter');
+      setError(reason instanceof Error ? reason.message : 'Could not use that hint');
     }
   }
 
@@ -141,8 +155,14 @@ export function SolveScreen(props: {
     const word = bundle.words[editor.wordIndex];
     const tile = word.tiles[editor.tileIndex];
     if (!tile || tile.kind !== 'letter') return;
+    if (sessionRef.current.revealedLetters[tile.number]) {
+      setHintNote('Revealed letters stay locked.');
+      return;
+    }
+    const before = sessionRef.current.present[tile.number];
     const next = setLetter(sessionRef.current, tile.number, letter);
     setSession(next);
+    setMarkedWrong((current) => marksAfterEdit(current, tile.number, before, next.present[tile.number]));
     if (wordIsFull(word, next.present)) {
       setEditor(null);
       return;
@@ -169,7 +189,17 @@ export function SolveScreen(props: {
       if (event.key === 'Backspace') {
         const word = bundle.words[wordIndex];
         const tile = word.tiles[tileIndex];
-        if (tile && tile.kind === 'letter') setSession((current) => unsetNumber(current, tile.number));
+        if (!tile || tile.kind !== 'letter') return;
+        if (sessionRef.current.revealedLetters[tile.number]) {
+          setHintNote('Revealed letters stay locked.');
+          return;
+        }
+        const before = sessionRef.current.present[tile.number];
+        setSession((current) => {
+          const next = unsetNumber(current, tile.number);
+          setMarkedWrong((marks) => marksAfterEdit(marks, tile.number, before, next.present[tile.number]));
+          return next;
+        });
         return;
       }
       if (event.key.length === 1) {
@@ -183,6 +213,9 @@ export function SolveScreen(props: {
 
   const selected = editor ? letterNumber(bundle.words, editor.wordIndex, editor.tileIndex) : null;
   const source = bundle.mode === 'live' ? 'Daily Quote' : 'Daily Quote sample';
+  const unveiled = session.attributionUnveiled && session.attribution !== null;
+  const author = unveiled && session.attribution ? session.attribution.author : (bundle.blurredAttribution ? bundle.blurredAttribution.author : null);
+  const attributionSource = unveiled && session.attribution ? session.attribution.work : (bundle.blurredAttribution ? bundle.blurredAttribution.source : null);
 
   return (
     <Shell>
@@ -193,14 +226,14 @@ export function SolveScreen(props: {
           <div className="fine">Par {formatDuration(parTimeMs(bundle.uniqueLetterCount))}</div>
         </div>
         <div className="pair">
-          <button type="button" className="icon-button" disabled={!session.past.length} onClick={() => setSession((current) => undo(current))}>Undo</button>
-          <button type="button" className="icon-button" disabled={!session.future.length} onClick={() => setSession((current) => redo(current))}>Redo</button>
+          <button type="button" className="icon-button" disabled={!session.past.length} onClick={() => stepHistory('undo')}>Undo</button>
+          <button type="button" className="icon-button" disabled={!session.future.length} onClick={() => stepHistory('redo')}>Redo</button>
         </div>
       </div>
+      <AttributionLine unveiled={unveiled} author={author} source={attributionSource} />
       <ModeBanner notice={props.notice} />
       {error ? <p className="alert" role="alert">{error}</p> : null}
-      {wrongCount !== null ? <p className="alert" role="alert">{offText(wrongCount)}</p> : null}
-      {revealArmed ? <p className="banner">Tap a tile to reveal that letter. This uses one hint.</p> : null}
+      {hintNote ? <p className="banner" role="status">{hintNote}</p> : null}
       <div className="board">
         {bundle.words.map((word, wordIndex) => (
           <div className="word" key={'w' + String(wordIndex)}>
@@ -210,18 +243,23 @@ export function SolveScreen(props: {
               }
               const guess = session.present[tile.number] || '';
               const same = selected !== null && tile.number === selected;
-              const off = flagged.indexOf(tile.number) !== -1;
-              const className = 'tile' + (same ? ' tile-same' : '') + (off ? ' tile-off' : '');
+              const revealed = Boolean(session.revealedLetters[tile.number]);
+              const marked = !revealed && markedWrong.indexOf(tile.number) !== -1;
+              const className = tileCues({ markedWrong: marked, revealed: revealed, sameNumber: same });
               return (
                 <button
                   type="button"
                   key={'t' + String(tileIndex)}
                   className={className}
-                  aria-invalid={off || undefined}
-                  aria-label={'Number ' + String(tile.number) + (guess ? ', ' + guess : ', empty') + (off ? ', marked off' : '')}
+                  aria-invalid={marked || undefined}
+                  aria-label={tileLabel(tile.number, guess, marked, revealed)}
                   onClick={() => openWord(wordIndex, tileIndex)}
                 >
-                  <span className="tile-glyph">{guess || '\u00a0'}</span>
+                  <span className="tile-glyph">
+                    {marked ? <span className="tile-cue" aria-hidden="true">× </span> : null}
+                    {revealed ? <span className="tile-cue" aria-hidden="true">● </span> : null}
+                    {guess || '\u00a0'}
+                  </span>
                   <span className="tile-code">{tile.number}</span>
                 </button>
               );
@@ -232,46 +270,14 @@ export function SolveScreen(props: {
       <div className="stack">
         <p className="fine">No hints inside par time: 3 stars. One hint, or over par: 2. Two or more hints: 1. Showing the answer: 0.</p>
         <BigCard
-          title="Check my letters"
-          detail="1 hint. Wrong letters are marked for 3 seconds."
-          onClick={() => {
-            void bundle.api.check(sessionRef.current.present, sessionRef.current.hintsUsed).then(
-              (outcome) => {
-                setSession((current) => withHints(current, outcome.hintsUsed));
-                setFlagged(outcome.wrongNumbers.slice());
-              },
-              (reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not check'),
-            );
-          }}
-        />
-        <BigCard
-          title="Reveal a letter"
-          detail="1 hint. Then tap the tile you want filled."
-          pressed={revealArmed}
+          tone="gold"
+          title="Hint"
+          detail="Open the hint cards. The board stays quiet until you ask."
           onClick={() => {
             setEditor(null);
-            setRevealArmed((armed) => !armed);
+            setHintOpen(true);
           }}
         />
-        <BigCard
-          title="Letter frequency"
-          detail="1 hint the first time you open it."
-          pressed={frequencyOpen}
-          onClick={() => {
-            if (sessionRef.current.frequencyShown) {
-              setFrequencyOpen((open) => !open);
-              return;
-            }
-            void bundle.api.useFrequency(sessionRef.current.hintsUsed, false).then(
-              (outcome) => {
-                setSession((current) => withHints(current, outcome.hintsUsed, { frequencyShown: true }));
-                setFrequencyOpen(true);
-              },
-              (reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not use that hint'),
-            );
-          }}
-        />
-        {frequencyOpen ? <FrequencyBars counts={codeNumberCounts(bundle.words)} /> : null}
         <BigCard title="Give up" detail="Ask before the answer is shown." onClick={() => { setEditor(null); setGivingUp(true); }} />
         <BigCard title="Back to Today" onClick={props.onHome} />
       </div>
@@ -281,13 +287,31 @@ export function SolveScreen(props: {
           wordIndex={editor.wordIndex}
           tileIndex={editor.tileIndex}
           session={session}
+          markedWrong={markedWrong}
           onPick={place}
           onSelect={(tileIndex) => setEditor({ wordIndex: editor.wordIndex, tileIndex: tileIndex })}
           onClear={() => {
             const word = bundle.words[editor.wordIndex];
-            setSession((current) => unsetNumbers(current, numbersInWord(word)));
+            const numbers = numbersInWord(word);
+            setSession((current) => unsetNumbers(current, numbers));
+            setMarkedWrong((current) => {
+              let next = current;
+              for (const number of numbers) {
+                next = marksAfterEdit(next, number, 'x', undefined);
+              }
+              return next;
+            });
           }}
           onClose={() => setEditor(null)}
+        />
+      ) : null}
+      {hintOpen ? (
+        <HintPanel
+          hints={HINT_CATALOG}
+          state={boardState(session, bundle.words)}
+          note={hintNote}
+          onApply={(hint) => { void runHint(hint); }}
+          onClose={() => setHintOpen(false)}
         />
       ) : null}
       {givingUp ? (
@@ -299,9 +323,10 @@ export function SolveScreen(props: {
               <BigCard
                 title="Show the answer (0 stars)"
                 onClick={() => {
-                  void bundle.api.giveUp(sessionRef.current.elapsedMs, sessionRef.current.hintsUsed).then(
+                  const current = sessionRef.current;
+                  void bundle.api.giveUp(current.elapsedMs, current.hintsUsed, current.hintLog).then(
                     (outcome) => {
-                      setSession((current) => ({ ...current, gaveUp: true }));
+                      setSession((latest) => ({ ...latest, gaveUp: true }));
                       finish(outcome);
                     },
                     (reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not show the answer'),
@@ -316,6 +341,13 @@ export function SolveScreen(props: {
   );
 }
 
+function tileLabel(number: number, guess: string, marked: boolean, revealed: boolean): string {
+  let label = 'Number ' + String(number) + (guess ? ', ' + guess : ', empty');
+  if (marked) label += ', marked wrong';
+  if (revealed) label += ', revealed and locked';
+  return label;
+}
+
 function letterNumber(words: Word[], wordIndex: number, tileIndex: number): number | null {
   const tile = words[wordIndex] && words[wordIndex].tiles[tileIndex];
   if (!tile || tile.kind !== 'letter') return null;
@@ -327,6 +359,7 @@ function WordSheet(props: {
   wordIndex: number;
   tileIndex: number;
   session: SolveState;
+  markedWrong: number[];
   onPick: (letter: string) => void;
   onSelect: (tileIndex: number) => void;
   onClear: () => void;
@@ -351,11 +384,16 @@ function WordSheet(props: {
             if (tile.kind === 'mark') return <span className="tile-mark" key={'em' + String(tileIndex)}>{tile.char}</span>;
             const guess = props.session.present[tile.number] || '';
             const current = tileIndex === props.tileIndex;
+            const revealed = Boolean(props.session.revealedLetters[tile.number]);
+            const marked = !revealed && props.markedWrong.indexOf(tile.number) !== -1;
+            const className = tileCues({ markedWrong: marked, revealed: revealed, sameNumber: false })
+              + (current ? ' tile-current' : '')
+              + ' editor-tile';
             return (
               <button
                 type="button"
                 key={'et' + String(tileIndex)}
-                className={'tile editor-tile' + (current ? ' tile-current' : '')}
+                className={className}
                 onClick={() => props.onSelect(tileIndex)}
               >
                 <span className="tile-glyph">{guess || '\u00a0'}</span>
