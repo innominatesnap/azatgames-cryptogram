@@ -174,16 +174,32 @@ create table if not exists cryptogram.message_secrets (
   constraint message_secrets_cap check (char_length(plain_text) <= 400)
 );
 
+-- Reports are moderation evidence. They stay when the reporter, the reported
+-- sender, or the message is deleted: those foreign keys are ON DELETE SET NULL,
+-- and the row keeps the reason plus a snapshot of the message text and metadata.
+-- Intentionally still ON DELETE CASCADE: friendships, blocks, profiles,
+-- household membership, attempts, messages (and message_secrets), and
+-- rate_limit_counters. A block or friendship is meaningless once either person
+-- is gone. Rate-limit counters are operational, not evidence. The live message
+-- is removed with its sender or recipient; this snapshot is the copy kept for review.
 create table if not exists cryptogram.reports (
   id uuid primary key default gen_random_uuid(),
-  reporter_id uuid not null references auth.users (id) on delete cascade,
-  message_id uuid not null references cryptogram.messages (id) on delete cascade,
+  reporter_id uuid references auth.users (id) on delete set null,
+  sender_id uuid references auth.users (id) on delete set null,
+  message_id uuid references cryptogram.messages (id) on delete set null,
   reason text not null,
   note text,
   status text not null default 'open',
+  message_text text not null,
+  message_coded jsonb not null,
+  message_screening_status text not null,
+  message_created_at timestamptz not null,
   created_at timestamptz not null default now(),
   constraint reports_reason check (reason in ('bullying', 'sexual', 'hate', 'scam', 'danger', 'other')),
-  constraint reports_status check (status in ('open', 'reviewing', 'closed'))
+  constraint reports_status check (status in ('open', 'reviewing', 'closed')),
+  constraint reports_message_text_len check (char_length(message_text) between 1 and 400),
+  constraint reports_message_text_no_digits check (message_text !~ '[0-9]'),
+  constraint reports_screening check (message_screening_status in ('pending', 'cleared', 'held', 'blocked'))
 );
 
 create index if not exists reports_status_idx on cryptogram.reports (status, created_at);
@@ -1134,7 +1150,10 @@ comment on table cryptogram.profiles is
   'CryptoGram-only age acknowledgement. Under 13 is never stored. A hub-level gate remains an open question.';
 
 comment on table cryptogram.messages is
-  'Friend deliveries for a later slice. screening_status is pending, cleared, held, or blocked. Plain text is not in this table.';
+  'Friend deliveries for a later slice. screening_status is pending, cleared, held, or blocked. Plain text is not in this table. Sender and recipient use ON DELETE CASCADE; a report snapshot is the copy kept for review.';
+
+comment on table cryptogram.reports is
+  'Moderation reports kept after the reporter, reported sender, or message is deleted. reporter_id, sender_id, and message_id are ON DELETE SET NULL. message_text, message_coded, message_screening_status, and message_created_at are the review snapshot. Friendships, blocks, and rate_limit_counters stay ON DELETE CASCADE.';
 
 notify pgrst, 'reload schema';
 
