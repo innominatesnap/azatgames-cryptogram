@@ -3,6 +3,7 @@ import type { Word } from '../engine/cipher';
 import type { SolveState } from '../engine/solve';
 import { tileCues } from '../hints/feedback';
 import { keyboardFaces, sameSpot, type TileSpot } from '../play/input';
+import { letterSlotFace } from './glyphs';
 import { scrollDelta } from './scrollTile';
 
 export type PlayMode = 'practice' | 'live';
@@ -67,7 +68,11 @@ export function PuzzleBoard(props: {
           <div className="word" key={'w' + String(wordIndex)}>
             {word.tiles.map((tile, tileIndex) => {
               if (tile.kind === 'mark') {
-                return <span className="tile-mark" key={'m' + String(tileIndex)}>{tile.char}</span>;
+                return (
+                  <span className="tile-mark" key={'m' + String(tileIndex)}>
+                    <span className="tile-glyph tile-punct">{tile.char}</span>
+                  </span>
+                );
               }
               const guess = props.session.present[tile.number] || '';
               const spot = { wordIndex: wordIndex, tileIndex: tileIndex, number: tile.number };
@@ -95,7 +100,9 @@ export function PuzzleBoard(props: {
                   <span className="tile-glyph">
                     {marked ? <span className="tile-cue" aria-hidden="true">✕ </span> : null}
                     {revealed ? <span className="tile-cue" aria-hidden="true">lock </span> : null}
-                    {guess || '\u00a0'}
+                    {guess
+                      ? letterSlotFace(guess)
+                      : <span className="tile-dash" aria-hidden="true">{letterSlotFace(guess)}</span>}
                   </span>
                   <span className="tile-code">{tile.number}</span>
                 </button>
