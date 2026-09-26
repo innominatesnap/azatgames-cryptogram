@@ -3,7 +3,7 @@ import { codeNumberCounts } from '../engine/frequency';
 import { formatDuration } from '../engine/scoring';
 import type { Word } from '../engine/cipher';
 import type { SolveOutcome } from '../play/api';
-import { hintUsageLabel } from '../hints/registry';
+import { hintReceipt, shareResultText } from '../hints/registry';
 import { BigCard, ModeBanner, Shell, Wordmark } from './chrome';
 import { FrequencyBars } from './FrequencyBars';
 
@@ -20,7 +20,14 @@ export function CompleteScreen(props: {
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const share = 'CryptoGram Daily ' + props.outcome.dateLabel + ': ' + String(props.outcome.stars) + ' stars, ' + formatDuration(props.outcome.elapsedMs);
+  const clean = props.outcome.solved && !props.outcome.gaveUp && props.outcome.hintPoints === 0;
+  const share = shareResultText({
+    dateLabel: props.outcome.dateLabel,
+    stars: props.outcome.stars,
+    elapsedMs: props.outcome.elapsedMs,
+    hintPoints: props.outcome.hintPoints,
+    gaveUp: props.outcome.gaveUp,
+  });
   const heading = props.outcome.gaveUp ? 'Answer' : 'Solved';
   return (
     <Shell>
@@ -29,8 +36,10 @@ export function CompleteScreen(props: {
       <ModeBanner notice={props.notice} />
       <div className="stack">
         <div className="big-card tone-gold">
+          {clean ? <p className="seal">Clean solve</p> : null}
           <div className="stars" aria-label={String(props.outcome.stars) + ' of 3 stars'}>{starRow(props.outcome.stars)}</div>
-          <p>{formatDuration(props.outcome.elapsedMs)} · {hintUsageLabel(props.outcome.hintsUsed, props.outcome.hintLog)} · {props.outcome.points} points</p>
+          <p>{formatDuration(props.outcome.elapsedMs)} · {hintReceipt(props.outcome.hintPoints, props.outcome.hintLog)} · {props.outcome.points} points</p>
+          <p className="fine">0 hint points inside par earns 3 stars. 1 or 2 hint points, or 0 over par, earns 2. 3 or more earns 1.</p>
         </div>
         <BigCard
           title={props.outcome.quote.author}

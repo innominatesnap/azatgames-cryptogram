@@ -52,6 +52,7 @@ export function practiceConfirm(input: {
   mapping: Mapping;
   elapsedMs: number;
   hintsUsed: number;
+  hintPoints: number;
   uniqueLetterCount: number;
   longestWord: number;
   letterCount: number;
@@ -60,10 +61,10 @@ export function practiceConfirm(input: {
 }): ConfirmResult {
   const wrongCount = wrongLetterCount(input.words, input.mapping, input.solution);
   if (!isFilled(input.words, input.mapping) || wrongCount > 0) {
-    return { solved: false, wrongCount: wrongCount };
+    return { solved: false };
   }
   const scored = scoreSolve({
-    hintsUsed: input.hintsUsed,
+    hintPoints: input.hintPoints,
     gaveUp: false,
     elapsedMs: input.elapsedMs,
     uniqueLetterCount: input.uniqueLetterCount,
@@ -76,6 +77,7 @@ export function practiceConfirm(input: {
     stars: scored.stars,
     points: scored.points,
     hintsUsed: input.hintsUsed,
+    hintPoints: input.hintPoints,
     elapsedMs: input.elapsedMs,
     quote: sampleQuote(),
     dateLabel: input.dateLabel,
@@ -88,6 +90,7 @@ export function practiceConfirm(input: {
 export function practiceGiveUp(input: {
   elapsedMs: number;
   hintsUsed: number;
+  hintPoints: number;
   letterCount: number;
   dateLabel: string;
   hintLog?: HintRecord[];
@@ -98,6 +101,7 @@ export function practiceGiveUp(input: {
     stars: 0,
     points: 0,
     hintsUsed: input.hintsUsed,
+    hintPoints: input.hintPoints,
     elapsedMs: input.elapsedMs,
     quote: sampleQuote(),
     dateLabel: input.dateLabel,

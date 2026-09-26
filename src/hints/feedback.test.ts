@@ -8,6 +8,7 @@ const outcome: SolveOutcome = {
   stars: 3,
   points: 10,
   hintsUsed: 0,
+  hintPoints: 0,
   elapsedMs: 1000,
   quote: { author: 'A', work: 'B', year: 1600, plainText: 'Hi', sourceNote: 'Note' },
   dateLabel: 'Sample',
@@ -17,7 +18,7 @@ const outcome: SolveOutcome = {
 
 describe('no instant feedback', () => {
   it('keeps a full but unsolved board silent', () => {
-    const shown = presentFillCheck({ solved: false, wrongCount: 8 });
+    const shown = presentFillCheck({ solved: false });
     expect(shown.outcome).toBeNull();
     expect(shown.message).toBeNull();
     expect(JSON.stringify(shown).toLowerCase()).not.toContain('off');
@@ -36,6 +37,7 @@ describe('no instant feedback', () => {
     expect(quiet).not.toContain('mistake');
     expect(quiet).not.toContain('off');
     expect(tileCues({ markedWrong: true, revealed: false, sameNumber: false })).toContain('tile-mistake');
+    expect(tileCues({ markedWrong: true, revealed: true, sameNumber: false })).toContain('tile-revealed');
   });
 
   it('clears a red mark when that letter changes', () => {

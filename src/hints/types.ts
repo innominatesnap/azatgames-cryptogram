@@ -1,66 +1,63 @@
 import type { Mapping } from '../engine/solve';
-import type { Attribution, HintRecord } from './records';
+import type { HintRecord } from './records';
 
 export type HintBoardState = {
   mapping: Mapping;
   revealedNumbers: number[];
-  attributionUnveiled: boolean;
   cipherNumbers: number[];
+  uniqueLetterCount: number;
   hintLog: HintRecord[];
   hintsUsed: number;
+  hintPoints: number;
+  frequencyShown: boolean;
+  crossedOff: string[];
+  attributionStage: 0 | 1 | 2;
+  markedNumbers: number[];
+  puzzleKey: string;
 };
 
-export type HintEffect =
-  | {
-      action: 'mark';
-      id: string;
-      number: number;
-      hintsUsed: number;
-      hintLog: HintRecord[];
-      note: string;
-    }
-  | {
-      action: 'reveal';
-      id: string;
-      number: number;
-      letter: string;
-      fallback: boolean;
-      hintsUsed: number;
-      hintLog: HintRecord[];
-      note: string;
-    }
-  | {
-      action: 'unveil';
-      id: string;
-      attribution: Attribution;
-      hintsUsed: number;
-      hintLog: HintRecord[];
-      note: string;
-    }
-  | {
-      action: 'none';
-      id: string;
-      hintsUsed: number;
-      hintLog: HintRecord[];
-      note: string;
-    };
-
-export type HintGateway = {
-  request(id: string, state: HintBoardState): Promise<HintEffect>;
+export type HintExtra = {
+  number?: number;
+  confirm?: boolean;
 };
 
 /**
- * One entry in the hint catalog. Cards render from this list.
- * `weight` is a placeholder for a later catalog. It is not a price.
+ * Only the fields for `action` are meaningful.
+ * A mark never includes a correct letter. An author stage never includes the source or the quote.
  */
+export type HintEffect = {
+  action: 'mark' | 'reveal' | 'cross-off' | 'frequency' | 'author' | 'source' | 'none';
+  id: string;
+  charged: boolean;
+  cost: number;
+  hintsUsed: number;
+  hintPoints: number;
+  hintLog: HintRecord[];
+  note: string;
+  numbers: number[];
+  letter: string;
+  letters: string[];
+  author: string;
+  work: string;
+  year: number;
+};
+
+export type HintGateway = {
+  request(id: string, state: HintBoardState, requestId: string, extra?: HintExtra): Promise<HintEffect>;
+};
+
 export type HintType = {
   id: string;
   category: string;
   title: string;
   description: string;
-  weight: number;
+  /** Hint-point cost from the config module. Not money. */
+  price: number;
+  stub: boolean;
+  icon: string;
   isAvailable(state: HintBoardState): boolean;
-  apply(state: HintBoardState, gateway: HintGateway): Promise<HintEffect>;
+  unavailableReason(state: HintBoardState): string | null;
+  apply(state: HintBoardState, gateway: HintGateway, requestId: string, extra?: HintExtra): Promise<HintEffect>;
 };
 
 export type HintGroup = {

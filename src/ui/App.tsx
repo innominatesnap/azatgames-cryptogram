@@ -168,6 +168,7 @@ export function App() {
       stars: outcome.stars,
       elapsedMs: outcome.elapsedMs,
       hintsUsed: outcome.hintsUsed,
+      hintPoints: outcome.hintPoints,
       letterCount: outcome.letterCount,
     };
     const next = rememberSolve(readStats(store), record);

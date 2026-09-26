@@ -1,13 +1,15 @@
 /*
- * Star and point rules from the design brief, section 2.4.
- * These constants match cryptogram.stars_for and cryptogram.points_for
- * in the database migration. Change them together.
- *
- * Worked example: 0 hints, 10 unique letters, 10000 ms -> 3 stars
- * (par is 200000 ms). The same solve at 200001 ms is 2 stars.
- * One hint is 2 stars at any time. Two or more hints is 1 star.
- * Giving up (reveal all) is 0 stars.
+ * Star thresholds live in src/hints/config.ts (STAR_RULES) and are mirrored
+ * by cryptogram.scoring_rules plus cryptogram.stars_for.
+ * Hint points, not a hint count, decide stars:
+ * 3 = 0 hint points and inside par
+ * 2 = 0 hint points over par, or 1–2 hint points
+ * 1 = 3 or more hint points
+ * 0 = gave up
+ * Points scored are still stars times difficulty.
  */
+
+import { STAR_RULES } from '../hints/config';
 
 export const PAR_SECONDS_PER_UNIQUE_LETTER = 20;
 export const PRE_REVEAL_PENALTY = 2;
@@ -18,15 +20,16 @@ export function parTimeMs(uniqueLetterCount: number): number {
 }
 
 export function starsForSolve(input: {
-  hintsUsed: number;
+  hintPoints: number;
   gaveUp: boolean;
   elapsedMs: number;
   uniqueLetterCount: number;
 }): number {
   if (input.gaveUp) return 0;
-  if (input.hintsUsed >= 2) return 1;
-  if (input.hintsUsed === 1 || input.elapsedMs > parTimeMs(input.uniqueLetterCount)) return 2;
-  return 3;
+  const points = input.hintPoints < 0 ? 0 : input.hintPoints;
+  if (points <= STAR_RULES.threeStarMaxPoints && input.elapsedMs <= parTimeMs(input.uniqueLetterCount)) return 3;
+  if (points <= STAR_RULES.twoStarMaxPoints) return 2;
+  return 1;
 }
 
 export function difficultyFactor(input: {
@@ -44,7 +47,7 @@ export function pointsForSolve(stars: number, difficulty: number): number {
 }
 
 export function scoreSolve(input: {
-  hintsUsed: number;
+  hintPoints: number;
   gaveUp: boolean;
   elapsedMs: number;
   uniqueLetterCount: number;
@@ -61,13 +64,27 @@ export function scoreSolve(input: {
 }
 
 /*
- * Later friend-message rule: the sender earns one point per hint the solver
- * needed. A clean solve pays no stumper bonus. The database still has to
- * require an accepted friendship older than 24 hours before awarding it.
+ * Later friend-message rule: the sender earns the solver's hint points.
+ * A clean solve (0 hint points) pays no stumper bonus. Friend allowances
+ * from H9 are not built. The database still has to require an accepted
+ * friendship older than 24 hours before awarding this.
  */
-export function stumperBonus(solverHints: number): number {
-  if (solverHints <= 0) return 0;
-  return solverHints;
+export function stumperBonus(solverHintPoints: number): number {
+  if (solverHintPoints <= 0) return 0;
+  return solverHintPoints;
+}
+
+export type BoardRow = {
+  points: number;
+  hintPoints: number;
+  elapsedMs: number;
+};
+
+/** Higher score, then fewer hint points, then a faster time. */
+export function compareBoardRows(left: BoardRow, right: BoardRow): number {
+  if (left.points !== right.points) return right.points - left.points;
+  if (left.hintPoints !== right.hintPoints) return left.hintPoints - right.hintPoints;
+  return left.elapsedMs - right.elapsedMs;
 }
 
 export function formatDuration(ms: number): string {

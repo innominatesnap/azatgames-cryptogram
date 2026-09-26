@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Word } from '../engine/cipher';
+import { codeNumberCounts } from '../engine/frequency';
 import { firstEmptyTileIndex, nextEmptyTileIndex, wordIsFull, wordLabel } from '../engine/editor';
 import { formatDuration, parTimeMs } from '../engine/scoring';
 import {
@@ -15,28 +16,19 @@ import {
   type SolveState,
 } from '../engine/solve';
 import { applyHintEffect } from '../hints/apply';
+import { boardFromSolve, newRequestId } from '../hints/board';
+import { costLabel } from '../hints/config';
 import { marksAfterEdit, presentFillCheck, tileCues } from '../hints/feedback';
-import { HINT_CATALOG } from '../hints/registry';
-import { cipherNumbersInWords } from '../hints/select';
-import type { HintBoardState, HintType } from '../hints/types';
+import { HINT_CATALOG, pointsUsedLabel } from '../hints/registry';
+import type { HintType } from '../hints/types';
 import type { SolveOutcome } from '../play/api';
 import type { PuzzleBundle } from '../play/bundle';
 import { AttributionLine } from './AttributionLine';
 import { BigCard, ModeBanner, Shell } from './chrome';
+import { FrequencyBars } from './FrequencyBars';
 import { HintPanel } from './HintPanel';
 
 const KEY_ROWS = ['ABCDEFG', 'HIJKLMN', 'OPQRSTU', 'VWXYZ'];
-
-function boardState(session: SolveState, words: Word[]): HintBoardState {
-  return {
-    mapping: session.present,
-    revealedNumbers: session.revealedNumbers,
-    attributionUnveiled: session.attributionUnveiled,
-    cipherNumbers: cipherNumbersInWords(words),
-    hintLog: session.hintLog,
-    hintsUsed: session.hintsUsed,
-  };
-}
 
 export function SolveScreen(props: {
   bundle: PuzzleBundle;
@@ -50,19 +42,22 @@ export function SolveScreen(props: {
   const [editor, setEditor] = useState<{ wordIndex: number; tileIndex: number } | null>(null);
   const [givingUp, setGivingUp] = useState(false);
   const [hintOpen, setHintOpen] = useState(false);
-  const [markedWrong, setMarkedWrong] = useState<number[]>([]);
+  const [chartOpen, setChartOpen] = useState(false);
+  const [highlight, setHighlight] = useState<number | null>(null);
+  const [shaking, setShaking] = useState<number[]>([]);
+  const [armed, setArmed] = useState<string | null>(null);
+  const [pendingLetter, setPendingLetter] = useState<string | null>(null);
   const [hintNote, setHintNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  const markedRef = useRef(markedWrong);
-  markedRef.current = markedWrong;
   const onDoneRef = useRef(props.onDone);
   onDoneRef.current = props.onDone;
   const onPersistRef = useRef(props.onPersist);
   onPersistRef.current = props.onPersist;
   const closing = useRef(false);
   const checked = useRef('');
+  const busy = useRef(false);
 
   useEffect(() => {
     const origin = Date.now();
@@ -86,6 +81,12 @@ export function SolveScreen(props: {
   }, [bundle.key]);
 
   useEffect(() => {
+    if (!shaking.length) return;
+    const id = window.setTimeout(() => setShaking([]), 150);
+    return () => window.clearTimeout(id);
+  }, [shaking]);
+
+  useEffect(() => {
     if (closing.current) return;
     if (!isFilled(bundle.words, session.present)) return;
     const key = stableMapping(session.present);
@@ -93,7 +94,7 @@ export function SolveScreen(props: {
     checked.current = key;
     let cancelled = false;
     const current = sessionRef.current;
-    void bundle.api.confirm(session.present, current.elapsedMs, current.hintsUsed, current.hintLog).then(
+    void bundle.api.confirm(session.present, current.elapsedMs, current.hintsUsed, current.hintPoints, current.hintLog).then(
       (result) => {
         if (cancelled || closing.current) return;
         const shown = presentFillCheck(result);
@@ -111,14 +112,11 @@ export function SolveScreen(props: {
   function stepHistory(direction: 'undo' | 'redo') {
     const current = sessionRef.current;
     const next = direction === 'undo' ? undo(current) : redo(current);
-    setMarkedWrong((marks) => {
-      let updated = marks;
-      for (const number of marks) {
-        updated = marksAfterEdit(updated, number, current.present[number], next.present[number]);
-      }
-      return updated;
-    });
-    setSession(next);
+    let marked = current.markedNumbers;
+    for (const number of marked) {
+      marked = marksAfterEdit(marked, number, current.present[number], next.present[number]);
+    }
+    setSession({ ...next, markedNumbers: marked });
   }
 
   function finish(outcome: SolveOutcome) {
@@ -132,25 +130,54 @@ export function SolveScreen(props: {
     setGivingUp(false);
   }
 
-  async function runHint(hint: HintType) {
+  async function runHint(hint: HintType, extra?: { number?: number }, requestId?: string) {
+    if (busy.current) return;
+    busy.current = true;
     setError(null);
     const current = sessionRef.current;
+    const id = requestId || newRequestId();
     try {
-      const effect = await hint.apply(boardState(current, bundle.words), {
-        request(id, state) {
-          return bundle.api.requestHint(id, state);
+      const effect = await hint.apply(
+        boardFromSolve(current, bundle.words, bundle.key, bundle.uniqueLetterCount),
+        {
+          request(hintId, state, sentId, sentExtra) {
+            return bundle.api.requestHint(hintId, state, sentId, sentExtra);
+          },
         },
-      });
-      const applied = applyHintEffect(current, markedRef.current, effect);
+        id,
+        extra,
+      );
+      const applied = applyHintEffect(current, effect);
       setSession(applied.state);
-      setMarkedWrong(applied.marked);
       setHintNote(applied.note);
+      if (effect.action === 'mark' && effect.numbers.length) setShaking(effect.numbers);
+      if (effect.action === 'frequency') {
+        setHintOpen(false);
+        setChartOpen(true);
+      } else if (effect.charged || effect.action === 'reveal' || effect.action === 'cross-off' || effect.action === 'author' || effect.action === 'source') {
+        setHintOpen(false);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not use that hint');
+    } finally {
+      busy.current = false;
     }
   }
 
-  function place(letter: string) {
+  async function revealPicked(number: number) {
+    const requestId = armed;
+    setArmed(null);
+    const current = sessionRef.current;
+    if (current.revealedLetters[number]) {
+      setHintNote('That letter is already revealed.');
+      return;
+    }
+    const hint = HINT_CATALOG.find((item) => item.id === 'pick-letter');
+    if (!hint) return;
+    await runHint(hint, { number: number }, requestId || undefined);
+  }
+
+  function commitLetter(letter: string) {
     if (!editor) return;
     const word = bundle.words[editor.wordIndex];
     const tile = word.tiles[editor.tileIndex];
@@ -161,19 +188,28 @@ export function SolveScreen(props: {
     }
     const before = sessionRef.current.present[tile.number];
     const next = setLetter(sessionRef.current, tile.number, letter);
-    setSession(next);
-    setMarkedWrong((current) => marksAfterEdit(current, tile.number, before, next.present[tile.number]));
-    if (wordIsFull(word, next.present)) {
+    const marked = marksAfterEdit(next.markedNumbers, tile.number, before, next.present[tile.number]);
+    const stored = { ...next, markedNumbers: marked };
+    setSession(stored);
+    if (wordIsFull(word, stored.present)) {
       setEditor(null);
       return;
     }
-    const forward = nextEmptyTileIndex(word, next.present, editor.tileIndex);
+    const forward = nextEmptyTileIndex(word, stored.present, editor.tileIndex);
     if (forward !== null) {
       setEditor({ wordIndex: editor.wordIndex, tileIndex: forward });
       return;
     }
-    const first = firstEmptyTileIndex(word, next.present);
+    const first = firstEmptyTileIndex(word, stored.present);
     if (first !== null) setEditor({ wordIndex: editor.wordIndex, tileIndex: first });
+  }
+
+  function place(letter: string) {
+    if (session.crossedOff.indexOf(letter) !== -1) {
+      setPendingLetter(letter);
+      return;
+    }
+    commitLetter(letter);
   }
 
   useEffect(() => {
@@ -197,8 +233,10 @@ export function SolveScreen(props: {
         const before = sessionRef.current.present[tile.number];
         setSession((current) => {
           const next = unsetNumber(current, tile.number);
-          setMarkedWrong((marks) => marksAfterEdit(marks, tile.number, before, next.present[tile.number]));
-          return next;
+          return {
+            ...next,
+            markedNumbers: marksAfterEdit(next.markedNumbers, tile.number, before, next.present[tile.number]),
+          };
         });
         return;
       }
@@ -213,9 +251,10 @@ export function SolveScreen(props: {
 
   const selected = editor ? letterNumber(bundle.words, editor.wordIndex, editor.tileIndex) : null;
   const source = bundle.mode === 'live' ? 'Daily Quote' : 'Daily Quote sample';
-  const unveiled = session.attributionUnveiled && session.attribution !== null;
-  const author = unveiled && session.attribution ? session.attribution.author : (bundle.blurredAttribution ? bundle.blurredAttribution.author : null);
-  const attributionSource = unveiled && session.attribution ? session.attribution.work : (bundle.blurredAttribution ? bundle.blurredAttribution.source : null);
+  const author = session.attributionStage >= 1 && session.attribution ? session.attribution.author : null;
+  const work = session.attributionStage >= 2 && session.attribution ? session.attribution.work : null;
+  const year = session.attributionStage >= 2 && session.attribution ? session.attribution.year : null;
+  const crossed = session.crossedOff.slice().sort().join(', ');
 
   return (
     <Shell>
@@ -230,10 +269,17 @@ export function SolveScreen(props: {
           <button type="button" className="icon-button" disabled={!session.future.length} onClick={() => stepHistory('redo')}>Redo</button>
         </div>
       </div>
-      <AttributionLine unveiled={unveiled} author={author} source={attributionSource} />
+      <AttributionLine stage={session.attributionStage} author={author} work={work} year={year} />
       <ModeBanner notice={props.notice} />
       {error ? <p className="alert" role="alert">{error}</p> : null}
       {hintNote ? <p className="banner" role="status">{hintNote}</p> : null}
+      {armed ? (
+        <p className="banner" role="status">
+          Tap any tile to reveal its letter everywhere. {costLabel(3)}.
+          <button type="button" className="icon-button" onClick={() => setArmed(null)}>Cancel</button>
+        </p>
+      ) : null}
+      {crossed ? <p className="fine">Crossed off: {crossed}</p> : null}
       <div className="board">
         {bundle.words.map((word, wordIndex) => (
           <div className="word" key={'w' + String(wordIndex)}>
@@ -242,22 +288,30 @@ export function SolveScreen(props: {
                 return <span className="tile-mark" key={'m' + String(tileIndex)}>{tile.char}</span>;
               }
               const guess = session.present[tile.number] || '';
-              const same = selected !== null && tile.number === selected;
+              const same = (selected !== null && tile.number === selected) || highlight === tile.number;
               const revealed = Boolean(session.revealedLetters[tile.number]);
-              const marked = !revealed && markedWrong.indexOf(tile.number) !== -1;
-              const className = tileCues({ markedWrong: marked, revealed: revealed, sameNumber: same });
+              const marked = !revealed && session.markedNumbers.indexOf(tile.number) !== -1;
+              const className = tileCues({ markedWrong: marked, revealed: revealed, sameNumber: same })
+                + (shaking.indexOf(tile.number) !== -1 ? ' tile-shake' : '');
               return (
                 <button
                   type="button"
                   key={'t' + String(tileIndex)}
                   className={className}
                   aria-invalid={marked || undefined}
+                  title={marked ? 'This letter is wrong. Change it to clear the mark.' : undefined}
                   aria-label={tileLabel(tile.number, guess, marked, revealed)}
-                  onClick={() => openWord(wordIndex, tileIndex)}
+                  onClick={() => {
+                    if (armed) {
+                      void revealPicked(tile.number);
+                      return;
+                    }
+                    openWord(wordIndex, tileIndex);
+                  }}
                 >
                   <span className="tile-glyph">
-                    {marked ? <span className="tile-cue" aria-hidden="true">× </span> : null}
-                    {revealed ? <span className="tile-cue" aria-hidden="true">● </span> : null}
+                    {marked ? <span className="tile-cue" aria-hidden="true">✕ </span> : null}
+                    {revealed ? <span className="tile-cue" aria-hidden="true">lock </span> : null}
                     {guess || '\u00a0'}
                   </span>
                   <span className="tile-code">{tile.number}</span>
@@ -268,11 +322,11 @@ export function SolveScreen(props: {
         ))}
       </div>
       <div className="stack">
-        <p className="fine">No hints inside par time: 3 stars. One hint, or over par: 2. Two or more hints: 1. Showing the answer: 0.</p>
+        <p className="fine">0 hint points and inside par: 3 stars. 0 over par, or 1–2 hint points: 2 stars. 3 or more hint points: 1 star. Showing the answer: 0.</p>
         <BigCard
           tone="gold"
           title="Hint"
-          detail="Open the hint cards. The board stays quiet until you ask."
+          detail={pointsUsedLabel(session.hintPoints)}
           onClick={() => {
             setEditor(null);
             setHintOpen(true);
@@ -287,32 +341,75 @@ export function SolveScreen(props: {
           wordIndex={editor.wordIndex}
           tileIndex={editor.tileIndex}
           session={session}
-          markedWrong={markedWrong}
           onPick={place}
           onSelect={(tileIndex) => setEditor({ wordIndex: editor.wordIndex, tileIndex: tileIndex })}
           onClear={() => {
             const word = bundle.words[editor.wordIndex];
             const numbers = numbersInWord(word);
-            setSession((current) => unsetNumbers(current, numbers));
-            setMarkedWrong((current) => {
-              let next = current;
+            setSession((current) => {
+              const next = unsetNumbers(current, numbers);
+              let marked = next.markedNumbers;
               for (const number of numbers) {
-                next = marksAfterEdit(next, number, 'x', undefined);
+                marked = marksAfterEdit(marked, number, 'x', next.present[number]);
               }
-              return next;
+              return { ...next, markedNumbers: marked };
             });
           }}
           onClose={() => setEditor(null)}
         />
       ) : null}
+      {pendingLetter ? (
+        <div className="sheet-scrim">
+          <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="cross-title">
+            <h2 id="cross-title" className="screen-title">{pendingLetter} is not in this puzzle. Place it anyway?</h2>
+            <div className="stack">
+              <BigCard
+                tone="gold"
+                title={'Place ' + pendingLetter + ' anyway'}
+                onClick={() => {
+                  const letter = pendingLetter;
+                  setPendingLetter(null);
+                  commitLetter(letter);
+                }}
+              />
+              <BigCard title="Leave it crossed off" onClick={() => setPendingLetter(null)} />
+            </div>
+          </div>
+        </div>
+      ) : null}
       {hintOpen ? (
         <HintPanel
           hints={HINT_CATALOG}
-          state={boardState(session, bundle.words)}
+          state={boardFromSolve(session, bundle.words, bundle.key, bundle.uniqueLetterCount)}
           note={hintNote}
           onApply={(hint) => { void runHint(hint); }}
+          onArmPick={() => {
+            setHintOpen(false);
+            setArmed(newRequestId());
+            setHintNote(null);
+          }}
+          onOpenChart={() => {
+            setHintOpen(false);
+            setChartOpen(true);
+          }}
           onClose={() => setHintOpen(false)}
         />
+      ) : null}
+      {chartOpen ? (
+        <div className="sheet-scrim" onClick={() => setChartOpen(false)}>
+          <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="chart-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="chart-title" className="screen-title">Letter frequency chart</h2>
+            <FrequencyBars
+              counts={codeNumberCounts(bundle.words)}
+              revealed={session.revealedLetters}
+              highlight={highlight}
+              onHighlight={(number) => setHighlight(number)}
+            />
+            <button type="button" className="big-card tone-gold" onClick={() => setChartOpen(false)}>
+              <span className="big-card-title">Close</span>
+            </button>
+          </div>
+        </div>
       ) : null}
       {givingUp ? (
         <div className="sheet-scrim">
@@ -324,7 +421,7 @@ export function SolveScreen(props: {
                 title="Show the answer (0 stars)"
                 onClick={() => {
                   const current = sessionRef.current;
-                  void bundle.api.giveUp(current.elapsedMs, current.hintsUsed, current.hintLog).then(
+                  void bundle.api.giveUp(current.elapsedMs, current.hintsUsed, current.hintPoints, current.hintLog).then(
                     (outcome) => {
                       setSession((latest) => ({ ...latest, gaveUp: true }));
                       finish(outcome);
@@ -359,7 +456,6 @@ function WordSheet(props: {
   wordIndex: number;
   tileIndex: number;
   session: SolveState;
-  markedWrong: number[];
   onPick: (letter: string) => void;
   onSelect: (tileIndex: number) => void;
   onClear: () => void;
@@ -385,7 +481,7 @@ function WordSheet(props: {
             const guess = props.session.present[tile.number] || '';
             const current = tileIndex === props.tileIndex;
             const revealed = Boolean(props.session.revealedLetters[tile.number]);
-            const marked = !revealed && props.markedWrong.indexOf(tile.number) !== -1;
+            const marked = !revealed && props.session.markedNumbers.indexOf(tile.number) !== -1;
             const className = tileCues({ markedWrong: marked, revealed: revealed, sameNumber: false })
               + (current ? ' tile-current' : '')
               + ' editor-tile';
@@ -394,9 +490,14 @@ function WordSheet(props: {
                 type="button"
                 key={'et' + String(tileIndex)}
                 className={className}
+                title={marked ? 'This letter is wrong. Change it to clear the mark.' : undefined}
                 onClick={() => props.onSelect(tileIndex)}
               >
-                <span className="tile-glyph">{guess || '\u00a0'}</span>
+                <span className="tile-glyph">
+                  {marked ? <span className="tile-cue" aria-hidden="true">✕ </span> : null}
+                  {revealed ? <span className="tile-cue" aria-hidden="true">lock </span> : null}
+                  {guess || '\u00a0'}
+                </span>
                 <span className="tile-code">{tile.number}</span>
               </button>
             );
@@ -411,13 +512,20 @@ function WordSheet(props: {
               {row.split('').map((letter) => {
                 const used = isLetterInUseElsewhere(props.session.present, letter, selected);
                 const current = selected !== null && props.session.present[selected] === letter;
-                const className = 'key' + (used ? ' key-used' : '') + (current ? ' key-current' : '');
+                const crossedOff = props.session.crossedOff.indexOf(letter) !== -1;
+                const locked = selected !== null && Boolean(props.session.revealedLetters[selected]);
+                const className = 'key'
+                  + (used ? ' key-used' : '')
+                  + (current ? ' key-current' : '')
+                  + (crossedOff ? ' key-crossed' : '');
                 return (
                   <button
                     type="button"
                     key={letter}
                     className={className}
-                    aria-label={letter + (used ? ', in use, still available' : '')}
+                    disabled={locked}
+                    title={crossedOff ? 'Not in this puzzle.' : undefined}
+                    aria-label={letter + (crossedOff ? ', not in this puzzle' : '') + (used ? ', in use, still available' : '')}
                     onClick={() => props.onPick(letter)}
                   >
                     {letter}

@@ -21,6 +21,20 @@ function mappingJson(mapping: Mapping): { [key: string]: string } {
   return out;
 }
 
+function letterList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const next: string[] = [];
+  for (const value of raw) {
+    if (typeof value === 'string' && value.length === 1) next.push(value.toUpperCase());
+  }
+  return next;
+}
+
+function stageFrom(raw: unknown, unveiled: boolean): 0 | 1 | 2 {
+  if (raw === 0 || raw === 1 || raw === 2) return raw;
+  return unveiled ? 1 : 0;
+}
+
 function numberList(raw: unknown): number[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((value) => Number.isInteger(value)) as number[];
@@ -44,7 +58,12 @@ function hintLogFrom(raw: unknown): HintRecord[] {
     if (!item || typeof item !== 'object') continue;
     const row = item as { [key: string]: unknown };
     if (typeof row.id !== 'string' || !row.id) continue;
-    next.push({ id: row.id, action: typeof row.action === 'string' ? row.action : '' });
+    next.push({
+      id: row.id,
+      action: typeof row.action === 'string' ? row.action : '',
+      cost: typeof row.cost === 'number' ? row.cost : 0,
+      requestId: typeof row.requestId === 'string' ? row.requestId : '',
+    });
   }
   return next;
 }
@@ -64,6 +83,7 @@ function outcomeFrom(
     stars: typeof row.stars === 'number' ? row.stars : 0,
     points: typeof row.points === 'number' ? row.points : 0,
     hintsUsed: typeof row.hintsUsed === 'number' ? row.hintsUsed : 0,
+    hintPoints: typeof row.hintPoints === 'number' ? row.hintPoints : 0,
     elapsedMs: typeof row.elapsedMs === 'number' ? row.elapsedMs : elapsedMs,
     quote: quoteFrom(row),
     dateLabel: dateLabel,
@@ -114,7 +134,7 @@ async function selectPublic(client: CryptogramClient, date: string) {
 export async function fetchAttempt(client: CryptogramClient, puzzleId: string): Promise<SolveState & { solved: boolean }> {
   const { data, error } = await client
     .from('attempts')
-    .select('letter_mapping, hints_used, elapsed_ms, solved, gave_up, frequency_used, revealed_numbers, hint_log, attribution_unveiled')
+    .select('letter_mapping, hints_used, hint_points, elapsed_ms, solved, gave_up, frequency_used, revealed_numbers, hint_log, attribution_unveiled, attribution_stage, crossed_off, marked_numbers')
     .eq('puzzle_id', puzzleId)
     .maybeSingle();
   if (error) {
@@ -127,7 +147,12 @@ export async function fetchAttempt(client: CryptogramClient, puzzleId: string): 
 
 function missingHintColumns(message: string): boolean {
   const lower = message.toLowerCase();
-  return lower.indexOf('hint_log') !== -1 || lower.indexOf('attribution_unveiled') !== -1;
+  return lower.indexOf('hint_log') !== -1
+    || lower.indexOf('attribution_unveiled') !== -1
+    || lower.indexOf('hint_points') !== -1
+    || lower.indexOf('attribution_stage') !== -1
+    || lower.indexOf('crossed_off') !== -1
+    || lower.indexOf('marked_numbers') !== -1;
 }
 
 async function fetchAttemptLegacy(client: CryptogramClient, puzzleId: string): Promise<SolveState & { solved: boolean }> {
@@ -153,11 +178,15 @@ function attemptFromRow(row: { [key: string]: unknown }): SolveState & { solved:
     present: present,
     future: [],
     hintsUsed: typeof row.hints_used === 'number' ? row.hints_used : 0,
+    hintPoints: typeof row.hint_points === 'number' ? row.hint_points : 0,
     hintLog: hintLogFrom(row.hint_log),
     frequencyShown: row.frequency_used === true,
     revealedNumbers: revealedNumbers,
     revealedLetters: revealedLetters,
-    attributionUnveiled: row.attribution_unveiled === true,
+    crossedOff: letterList(row.crossed_off),
+    markedNumbers: numberList(row.marked_numbers),
+    attributionStage: stageFrom(row.attribution_stage, row.attribution_unveiled === true),
+    attributionUnveiled: stageFrom(row.attribution_stage, row.attribution_unveiled === true) > 0,
     attribution: null,
     gaveUp: row.gave_up === true,
     elapsedMs: typeof row.elapsed_ms === 'number' ? row.elapsed_ms : 0,
@@ -202,13 +231,15 @@ export function createLiveApi(
   letterCount: number,
 ): PuzzleApi {
   return {
-    async requestHint(id, state) {
+    async requestHint(id, state, requestId, extra) {
       const data = await rpcBody(client, 'request_hint', {
         p_puzzle_id: puzzleId,
         p_hint_type: id,
         p_current_mapping: mappingJson(state.mapping),
+        p_request_id: requestId,
+        p_number: extra && extra.number ? extra.number : null,
       });
-      return effectFromServer(data, id, state.hintsUsed, state.hintLog);
+      return effectFromServer(data, id, state);
     },
     async check(mapping, hintsUsed) {
       const data = await rpcBody(client, 'check_letters', {
@@ -242,20 +273,19 @@ export function createLiveApi(
       const row = (data || {}) as { [key: string]: unknown };
       return { hintsUsed: typeof row.hintsUsed === 'number' ? row.hintsUsed : hintsUsed + 1 };
     },
-    async confirm(mapping, elapsedMs, hintsUsed, hintLog) {
+    async confirm(mapping, elapsedMs, hintsUsed, hintPoints, hintLog) {
       void hintsUsed;
+      void hintPoints;
       const data = await rpcBody(client, 'confirm_solve', {
         p_puzzle_id: puzzleId,
         p_mapping: mappingJson(mapping),
         p_elapsed_ms: elapsedMs,
       });
       const row = (data || {}) as { [key: string]: unknown };
-      if (row.solved !== true) {
-        return { solved: false, wrongCount: typeof row.wrongCount === 'number' ? row.wrongCount : 0 };
-      }
+      if (row.solved !== true) return { solved: false };
       return { solved: true, outcome: outcomeFrom(row, dateLabel, letterCount, elapsedMs, hintLog) };
     },
-    async giveUp(elapsedMs, hintsUsed, hintLog) {
+    async giveUp(elapsedMs, hintsUsed, hintPoints, hintLog) {
       const data = await rpcBody(client, 'give_up', {
         p_puzzle_id: puzzleId,
         p_elapsed_ms: elapsedMs,
@@ -265,6 +295,7 @@ export function createLiveApi(
       outcome.solved = false;
       outcome.stars = 0;
       if (!outcome.hintLog.length) outcome.hintLog = hintLog;
+      if (!outcome.hintPoints) outcome.hintPoints = hintPoints;
       void hintsUsed;
       return outcome;
     },
