@@ -6,6 +6,7 @@ import {
   type Cell,
 } from "./encode";
 import { DEMO_AUTHOR, DEMO_QUOTE, DEMO_SOURCE } from "./quote";
+import { EMPTY_SLOT_DASH } from "../ui/glyphs";
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
@@ -207,7 +208,7 @@ export function Demo() {
             {word.map((spot) =>
               spot.kind === "mark" ? (
                 <span className="mark" key={spot.key}>
-                  {spot.value}
+                  <span className="glyph mark-glyph">{spot.value}</span>
                 </span>
               ) : (
                 <CipherCell
@@ -334,7 +335,7 @@ function CipherCell({
     >
       <span className="num">{spot.number}</span>
       <span className="glyph" aria-hidden="true">
-        {glyph ?? <span className="blank" />}
+        {glyph ?? <span className="slot-dash">{EMPTY_SLOT_DASH}</span>}
       </span>
     </button>
   );

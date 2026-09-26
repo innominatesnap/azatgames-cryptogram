@@ -1,0 +1,22 @@
+/* Azat Games hub tokens (login.azat.games). One palette for the landing page and the play screen. */
+:root {
+  --bg-base: #060916;
+  --bg-panel: #0b1024;
+  --bg-elevated: #131a36;
+  --border-soft: rgba(148, 163, 255, 0.12);
+  --border-strong: rgba(148, 163, 255, 0.22);
+  --text-main: #e8ecff;
+  --text-muted: #8791b3;
+  --text-dim: #5c6690;
+  --accent-blue: #4f7cff;
+  --accent-cyan: #22d3ee;
+  --gradient-from: #2563eb;
+  --gradient-from-bright: #3b82f6;
+  --gradient-to: #06b6d4;
+  --gradient-to-bright: #22d3ee;
+  --accent-gradient: linear-gradient(90deg, var(--gradient-from-bright), var(--gradient-to));
+  --accent-gradient-hover: linear-gradient(90deg, var(--gradient-from-bright), var(--gradient-to-bright));
+  --page-glow:
+    radial-gradient(1200px 800px at 15% -10%, rgba(79, 124, 255, 0.15), transparent 55%),
+    radial-gradient(900px 700px at 90% 10%, rgba(34, 211, 238, 0.1), transparent 60%);
+}
