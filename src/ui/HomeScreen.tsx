@@ -26,7 +26,7 @@ export function HomeScreen(props: {
           detail={props.solved ? 'Solved. ' + String(props.stars || 0) + ' stars.' : props.preview}
           onClick={props.solved ? props.onResult : props.onSolve}
         />
-        {!props.solved ? <BigCard tone="gold" title="Solve" detail="Open the board and the word keypad." onClick={props.onSolve} /> : null}
+        {!props.solved ? <BigCard tone="gold" title="Solve" detail="Open the board and type with the letter keyboard." onClick={props.onSolve} /> : null}
         <BigCard title="Inbox" detail="Friend cryptograms arrive in a later slice." />
         <BigCard title="Write a cryptogram" detail="Sending a message arrives in a later slice." />
         <BigCard title="Friends and household" detail="The household circle arrives in a later slice." />
