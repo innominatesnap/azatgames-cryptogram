@@ -45,9 +45,11 @@ describe("hosting", () => {
     ]);
   });
 
-  it("points the play placeholder home", () => {
+  it("loads the game from the play entry", () => {
     const html = readProject("play/index.html");
-    expect(html.toLowerCase()).toContain("coming soon");
-    expect(html).toContain('href="/"');
+    expect(html).toContain('src="/src/main.tsx"');
+    expect(html).toContain('href="/play/manifest.webmanifest"');
+    expect(html).not.toContain("$");
+    expect(html.toLowerCase()).not.toContain("coming soon");
   });
 });
