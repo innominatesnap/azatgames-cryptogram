@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CryptoGram — decode number-coded quotes</title>
+    <meta
+      name="description"
+      content="CryptoGram is an Azat game for ages 13 and up. Decode number-coded quotes and send cryptograms to friends."
+    />
+    <link rel="canonical" href="https://cryptogram.azat.games/" />
+    <meta name="theme-color" content="#060916" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Azat" />
+    <meta property="og:title" content="CryptoGram" />
+    <meta
+      property="og:description"
+      content="Decode number-coded quotes and send cryptograms to friends."
+    />
+    <meta property="og:url" content="https://cryptogram.azat.games/" />
+    <meta property="og:image" content="https://cryptogram.azat.games/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="CryptoGram, an Azat game. Decode number-coded quotes and send cryptograms to friends."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CryptoGram" />
+    <meta
+      name="twitter:description"
+      content="Decode number-coded quotes and send cryptograms to friends."
+    />
+    <meta name="twitter:image" content="https://cryptogram.azat.games/og.png" />
+    <meta
+      name="twitter:image:alt"
+      content="CryptoGram, an Azat game. Decode number-coded quotes and send cryptograms to friends."
+    />
+  </head>
+  <body>
+    <a class="skip" href="#specimen">Skip to the puzzle</a>
+    <div class="page">
+      <header class="mast">
+        <p class="dateline">
+          <span>Azat</span>
+          <span>A numbered quote</span>
+          <span>13+</span>
+        </p>
+        <div class="rule-double" role="presentation"></div>
+        <h1>CryptoGram</h1>
+        <p class="pitch">Decode number-coded quotes and send cryptograms to friends.</p>
+        <div class="rule-single" role="presentation"></div>
+      </header>
+
+      <section class="section" id="specimen" aria-labelledby="specimen-title">
+        <h2 id="specimen-title">Try a line</h2>
+        <p class="help" id="specimen-help">
+          Tap a number, then a letter. A correct letter fills in everywhere that number
+          appears. On a keyboard, use Tab, the arrow keys, and Enter.
+        </p>
+        <div id="demo" class="sheet" aria-busy="true"></div>
+        <noscript>
+          <p class="help">The specimen puzzle on this page needs JavaScript. Nothing is sent to a server.</p>
+        </noscript>
+      </section>
+
+      <section class="section" aria-labelledby="how-title">
+        <h2 id="how-title">How it works</h2>
+        <ol class="cards">
+          <li class="card">
+            <p class="index" aria-hidden="true">01</p>
+            <h3>Daily quote</h3>
+            <p>A new quote each day. Letters are swapped for numbers, and each number stands for a single letter.</p>
+          </li>
+          <li class="card">
+            <p class="index" aria-hidden="true">02</p>
+            <h3>Send to friends</h3>
+            <p>Compose a message, turn it into a cryptogram, and send it for a friend to solve.</p>
+          </li>
+          <li class="card">
+            <p class="index" aria-hidden="true">03</p>
+            <h3>Hints and stars</h3>
+            <p>Reveal a letter when you want a nudge. Stars mark a solve that used fewer hints.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section cta" aria-labelledby="cta-title">
+        <h2 id="cta-title" class="sr-only">Sign in</h2>
+        <a
+          class="btn"
+          id="sign-in"
+          href="https://login.azat.games/login?redirect_to=https%3A%2F%2Fcryptogram.azat.games%2Fplay"
+          >Coming soon · Sign in</a
+        >
+        <p class="age">For players 13 and up.</p>
+      </section>
+
+      <footer class="site-footer">
+        <a class="azat-lockup" href="https://azat.games">
+          <img src="/favicon.svg" width="28" height="28" alt="" />
+          Azat
+        </a>
+        <p class="footer-note">CryptoGram is a game from Azat.</p>
+      </footer>
+    </div>
+    <script type="module" src="/src/landing/main.tsx"></script>
+  </body>
+</html>
