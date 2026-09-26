@@ -7,6 +7,8 @@ export type SolveRecord = {
   stars: number;
   elapsedMs: number;
   hintsUsed: number;
+  /** Missing on older saves. Those count as clean only when hintsUsed is 0 and stars are above 0. */
+  hintPoints?: number;
   letterCount: number;
 };
 
@@ -14,6 +16,7 @@ export type StatsSummary = {
   solves: number;
   averageMs: number | null;
   streak: number;
+  cleanStreak: number;
   lettersSolved: number;
   hintsUsed: number;
   starsThisWeek: number;
@@ -60,10 +63,25 @@ export function summarizeStats(records: SolveRecord[], today: string): StatsSumm
     solves: records.length,
     averageMs: records.length ? Math.round(elapsed / records.length) : null,
     streak: streakFromDates(dates, today),
+    cleanStreak: cleanStreakFrom(records, today),
     lettersSolved: letters,
     hintsUsed: hints,
     starsThisWeek: starsThisWeek,
   };
+}
+
+export function isCleanRecord(row: SolveRecord): boolean {
+  if (row.stars <= 0) return false;
+  if (typeof row.hintPoints === 'number') return row.hintPoints === 0;
+  return row.hintsUsed === 0;
+}
+
+export function cleanStreakFrom(records: SolveRecord[], today: string): number {
+  const dates: string[] = [];
+  for (const row of records) {
+    if (isCleanRecord(row)) dates.push(row.date);
+  }
+  return streakFromDates(dates, today);
 }
 
 export function streakFromDates(dates: string[], today: string): number {

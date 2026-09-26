@@ -8,10 +8,15 @@ export type SolveState = {
   present: Mapping;
   future: Mapping[];
   hintsUsed: number;
+  hintPoints: number;
   hintLog: HintRecord[];
   frequencyShown: boolean;
   revealedNumbers: number[];
   revealedLetters: Mapping;
+  crossedOff: string[];
+  markedNumbers: number[];
+  /** 0 hidden, 1 author, 2 author plus source. */
+  attributionStage: 0 | 1 | 2;
   attributionUnveiled: boolean;
   attribution: Attribution | null;
   gaveUp: boolean;
@@ -30,10 +35,14 @@ export function emptySolveState(): SolveState {
     present: emptyMapping(),
     future: [],
     hintsUsed: 0,
+    hintPoints: 0,
     hintLog: [],
     frequencyShown: false,
     revealedNumbers: [],
     revealedLetters: {},
+    crossedOff: [],
+    markedNumbers: [],
+    attributionStage: 0,
     attributionUnveiled: false,
     attribution: null,
     gaveUp: false,

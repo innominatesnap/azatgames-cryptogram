@@ -34,6 +34,7 @@ export function HomeScreen(props: {
           title="My stats"
           detail={
             String(props.stats.starsThisWeek) + ' stars this week. Streak ' + String(props.stats.streak)
+            + '. Clean streak ' + String(props.stats.cleanStreak)
             + '. Average ' + average + '. '
             + String(props.stats.solves) + ' solves, '
             + String(props.stats.lettersSolved) + ' letters, '

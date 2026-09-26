@@ -1,6 +1,8 @@
 export type HintRecord = {
   id: string;
   action: string;
+  cost: number;
+  requestId: string;
 };
 
 export type Attribution = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rememberSolve, streakFromDates, summarizeStats, type SolveRecord } from './stats';
+import { cleanStreakFrom, rememberSolve, streakFromDates, summarizeStats, type SolveRecord } from './stats';
 
 function row(overrides: Partial<SolveRecord>): SolveRecord {
   return {
@@ -38,5 +38,20 @@ describe('stats', () => {
     expect(summary.hintsUsed).toBe(2);
     expect(summary.averageMs).toBe(45000);
     expect(summary.streak).toBe(0);
+    expect(summary.cleanStreak).toBe(0);
+  });
+
+  it('counts a clean streak from hint points, and from old rows that stored only a hint count', () => {
+    expect(cleanStreakFrom([
+      row({ date: '2026-09-26', stars: 3, hintPoints: 0 }),
+      row({ puzzleKey: 'older', date: '2026-09-25', stars: 2, hintPoints: 0 }),
+    ], '2026-09-26')).toBe(2);
+    expect(cleanStreakFrom([
+      row({ date: '2026-09-26', stars: 1, hintPoints: 3 }),
+      row({ puzzleKey: 'older', date: '2026-09-25', stars: 3 }),
+    ], '2026-09-26')).toBe(1);
+    expect(cleanStreakFrom([
+      row({ date: '2026-09-25', stars: 3, hintsUsed: 0 }),
+    ], '2026-09-26')).toBe(1);
   });
 });

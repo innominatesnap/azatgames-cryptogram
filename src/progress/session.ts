@@ -37,12 +37,16 @@ export function reviveSolveState(raw: unknown): SolveState | null {
     present: present,
     future: reviveMappingList(row.future),
     hintsUsed: typeof row.hintsUsed === 'number' && row.hintsUsed > 0 ? Math.floor(row.hintsUsed) : 0,
+    hintPoints: reviveHintPoints(row),
     hintLog: reviveHintLog(row.hintLog),
     frequencyShown: row.frequencyShown === true,
     revealedNumbers: revealed as number[],
     revealedLetters: revealedLetters,
-    attributionUnveiled: row.attributionUnveiled === true,
-    attribution: reviveAttribution(row.attribution),
+    crossedOff: reviveLetters(row.crossedOff),
+    markedNumbers: reviveNumbers(row.markedNumbers),
+    attributionStage: reviveStage(row),
+    attributionUnveiled: reviveStage(row) > 0,
+    attribution: reviveAttribution(row.attribution, reviveStage(row)),
     gaveUp: row.gaveUp === true,
     elapsedMs: typeof row.elapsedMs === 'number' && row.elapsedMs > 0 ? Math.floor(row.elapsedMs) : 0,
   };
@@ -55,20 +59,59 @@ function reviveHintLog(raw: unknown): HintRecord[] {
     if (!item || typeof item !== 'object') continue;
     const row = item as { [key: string]: unknown };
     if (typeof row.id !== 'string' || !row.id) continue;
-    next.push({ id: row.id, action: typeof row.action === 'string' ? row.action : '' });
+    next.push({
+      id: row.id,
+      action: typeof row.action === 'string' ? row.action : '',
+      cost: typeof row.cost === 'number' ? row.cost : 1,
+      requestId: typeof row.requestId === 'string' ? row.requestId : '',
+    });
   }
   return next;
 }
 
-function reviveAttribution(raw: unknown): Attribution | null {
-  if (!raw || typeof raw !== 'object') return null;
+function reviveHintPoints(row: Partial<SolveState>): number {
+  if (typeof row.hintPoints === 'number' && row.hintPoints > 0) return Math.floor(row.hintPoints);
+  const log = reviveHintLog(row.hintLog);
+  let sum = 0;
+  for (const item of log) sum += item.cost;
+  return sum;
+}
+
+function reviveNumbers(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((value) => Number.isInteger(value)) as number[];
+}
+
+function reviveLetters(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const next: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== 'string' || value.length !== 1) continue;
+    const upper = value.toUpperCase();
+    if (upper >= 'A' && upper <= 'Z' && next.indexOf(upper) === -1) next.push(upper);
+  }
+  return next;
+}
+
+function reviveStage(row: Partial<SolveState> & { attributionUnveiled?: boolean }): 0 | 1 | 2 {
+  if (row.attributionStage === 0 || row.attributionStage === 1 || row.attributionStage === 2) return row.attributionStage;
+  if (row.attribution && row.attribution.work) return 2;
+  if (row.attributionUnveiled || (row.attribution && row.attribution.author)) return 1;
+  return 0;
+}
+
+function reviveAttribution(raw: unknown, stage: 0 | 1 | 2): Attribution | null {
+  if (stage === 0 || !raw || typeof raw !== 'object') return null;
   const row = raw as { [key: string]: unknown };
-  if (typeof row.author !== 'string' || typeof row.work !== 'string') return null;
+  const author = typeof row.author === 'string' ? row.author : '';
+  const work = stage >= 2 && typeof row.work === 'string' ? row.work : '';
+  const year = stage >= 2 && typeof row.year === 'number' ? row.year : 0;
+  if (!author && !work) return null;
   return {
-    author: row.author,
-    work: row.work,
-    year: typeof row.year === 'number' ? row.year : 0,
-    sourceNote: typeof row.sourceNote === 'string' ? row.sourceNote : '',
+    author: author,
+    work: work,
+    year: year,
+    sourceNote: '',
   };
 }
 
@@ -119,6 +162,7 @@ function reviveOutcome(raw: unknown): SolveOutcome | null {
     stars: row.stars,
     points: typeof row.points === 'number' ? row.points : 0,
     hintsUsed: typeof row.hintsUsed === 'number' ? row.hintsUsed : 0,
+    hintPoints: typeof row.hintPoints === 'number' ? row.hintPoints : 0,
     elapsedMs: row.elapsedMs,
     hintLog: reviveHintLog(row.hintLog),
     quote: row.quote,
@@ -144,22 +188,37 @@ export function mergeProgress(local: SolveState | null, server: SolveState | nul
     if (revealed.indexOf(number) === -1) revealed.push(number);
   }
   const revealedLetters = { ...server.revealedLetters, ...local.revealedLetters };
-  const hintLog = local.hintsUsed > server.hintsUsed
+  const hintLog = local.hintPoints > server.hintPoints
     ? local.hintLog
-    : server.hintsUsed > local.hintsUsed
+    : server.hintPoints > local.hintPoints
       ? server.hintLog
       : (local.hintLog.length >= server.hintLog.length ? local.hintLog : server.hintLog);
-  const attribution = (local.attributionUnveiled && local.attribution) || server.attribution || local.attribution;
+  const stage = (local.attributionStage >= server.attributionStage ? local.attributionStage : server.attributionStage) as 0 | 1 | 2;
+  const richer = local.attributionStage >= server.attributionStage ? local.attribution : server.attribution;
+  const other = richer === local.attribution ? server.attribution : local.attribution;
+  const attribution = richer || other;
+  const crossed: string[] = [];
+  for (const letter of local.crossedOff.concat(server.crossedOff)) {
+    if (crossed.indexOf(letter) === -1) crossed.push(letter);
+  }
+  const marked: number[] = [];
+  for (const number of local.markedNumbers.concat(server.markedNumbers)) {
+    if (marked.indexOf(number) === -1) marked.push(number);
+  }
   return {
     past: mappingSource.past,
     present: mappingSource.present,
     future: mappingSource.future,
     hintsUsed: Math.max(local.hintsUsed, server.hintsUsed),
+    hintPoints: Math.max(local.hintPoints, server.hintPoints),
     hintLog: hintLog,
     frequencyShown: local.frequencyShown || server.frequencyShown,
     revealedNumbers: revealed,
     revealedLetters: revealedLetters,
-    attributionUnveiled: local.attributionUnveiled || server.attributionUnveiled,
+    crossedOff: crossed,
+    markedNumbers: marked,
+    attributionStage: stage,
+    attributionUnveiled: stage > 0,
     attribution: attribution,
     gaveUp: local.gaveUp || server.gaveUp,
     elapsedMs: Math.max(local.elapsedMs, server.elapsedMs),

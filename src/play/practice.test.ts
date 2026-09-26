@@ -47,6 +47,7 @@ describe('practice oracle', () => {
       mapping: mapping,
       elapsedMs: 1000,
       hintsUsed: 0,
+      hintPoints: 0,
       uniqueLetterCount: built.uniqueLetterCount,
       longestWord: built.longestWord,
       letterCount: built.letterCount,
@@ -64,6 +65,7 @@ describe('practice oracle', () => {
     const quit = practiceGiveUp({
       elapsedMs: 4000,
       hintsUsed: 2,
+      hintPoints: 3,
       letterCount: built.letterCount,
       dateLabel: 'Sample',
     });
@@ -75,12 +77,14 @@ describe('practice oracle', () => {
       mapping: placeLetter({}, 1, 'Q'),
       elapsedMs: 1000,
       hintsUsed: 0,
+      hintPoints: 0,
       uniqueLetterCount: built.uniqueLetterCount,
       longestWord: built.longestWord,
       letterCount: built.letterCount,
       dateLabel: 'Sample',
     });
     expect(miss.solved).toBe(false);
-    if (!miss.solved) expect(miss.wrongCount).toBeGreaterThan(0);
+    expect(JSON.stringify(miss)).not.toContain('wrongCount');
+    expect(JSON.stringify(miss)).not.toContain('Shakespeare');
   });
 });

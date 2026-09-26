@@ -5,8 +5,9 @@ import { mergeProgress, readSavedSession, writeSavedSession } from '../progress/
 import { SAMPLE_KEY } from '../data/sample';
 import type { PuzzleApi, SolveOutcome } from './api';
 import { fetchAttempt, fetchSolvedSummary, fetchTodayPuzzle, saveLiveProgress, createLiveApi } from './live';
+import { boardFromSolve, newRequestId } from '../hints/board';
+import { applyHintEffect } from '../hints/apply';
 import { createLocalGateway } from '../hints/localGateway';
-import { cipherNumbersInWords } from '../hints/select';
 import { sampleQuote } from './practice';
 import {
   practiceCheck,
@@ -22,8 +23,6 @@ export type PuzzleBundle = {
   mode: 'practice' | 'live';
   dateLabel: string;
   words: Word[];
-  /** Stub-only text used for the blurred attribution. Live mode leaves this null. */
-  blurredAttribution: { author: string; source: string } | null;
   uniqueLetterCount: number;
   letterCount: number;
   longestWord: number;
@@ -42,10 +41,10 @@ export function createPracticeBundle(storage: Store): PuzzleBundle {
   const built = samplePuzzle();
   const quote = sampleQuote();
   const saved = readSavedSession(storage, SAMPLE_KEY);
-  const gateway = createLocalGateway({ solution: built.solution, attribution: quote });
+  const gateway = createLocalGateway({ solution: built.solution, attribution: quote, puzzleKey: SAMPLE_KEY });
   const api: PuzzleApi = {
-    async requestHint(id, state) {
-      return gateway.request(id, state);
+    async requestHint(id, state, requestId, extra) {
+      return gateway.request(id, state, requestId, extra);
     },
     async check(mapping, hintsUsed) {
       return practiceCheck(built.solution, mapping, hintsUsed);
@@ -62,13 +61,14 @@ export function createPracticeBundle(storage: Store): PuzzleBundle {
     async useFrequency(hintsUsed, alreadyShown) {
       return practiceFrequency(hintsUsed, alreadyShown);
     },
-    async confirm(mapping, elapsedMs, hintsUsed, hintLog) {
+    async confirm(mapping, elapsedMs, hintsUsed, hintPoints, hintLog) {
       return practiceConfirm({
         words: built.words,
         solution: built.solution,
         mapping: mapping,
         elapsedMs: elapsedMs,
         hintsUsed: hintsUsed,
+        hintPoints: hintPoints,
         uniqueLetterCount: built.uniqueLetterCount,
         longestWord: built.longestWord,
         letterCount: built.letterCount,
@@ -76,10 +76,11 @@ export function createPracticeBundle(storage: Store): PuzzleBundle {
         hintLog: hintLog,
       });
     },
-    async giveUp(elapsedMs, hintsUsed, hintLog) {
+    async giveUp(elapsedMs, hintsUsed, hintPoints, hintLog) {
       return practiceGiveUp({
         elapsedMs: elapsedMs,
         hintsUsed: hintsUsed,
+        hintPoints: hintPoints,
         letterCount: built.letterCount,
         dateLabel: 'Sample',
         hintLog: hintLog,
@@ -91,7 +92,6 @@ export function createPracticeBundle(storage: Store): PuzzleBundle {
     mode: 'practice',
     dateLabel: 'Sample',
     words: built.words,
-    blurredAttribution: { author: quote.author, source: quote.work },
     uniqueLetterCount: built.uniqueLetterCount,
     letterCount: built.letterCount,
     longestWord: built.longestWord,
@@ -102,6 +102,37 @@ export function createPracticeBundle(storage: Store): PuzzleBundle {
       writeSavedSession(storage, SAMPLE_KEY, state, finished);
     },
   };
+}
+
+async function restoreAttribution(
+  api: PuzzleApi,
+  state: SolveState,
+  words: Word[],
+  puzzleKey: string,
+  uniqueLetterCount: number,
+): Promise<SolveState> {
+  let next = state;
+  try {
+    if (next.attributionStage >= 1 && (!next.attribution || !next.attribution.author)) {
+      const effect = await api.requestHint(
+        'unveil-author',
+        boardFromSolve(next, words, puzzleKey, uniqueLetterCount),
+        newRequestId(),
+      );
+      if (effect.action === 'author') next = applyHintEffect(next, effect).state;
+    }
+    if (next.attributionStage >= 2 && (!next.attribution || !next.attribution.work)) {
+      const effect = await api.requestHint(
+        'unveil-source',
+        boardFromSolve(next, words, puzzleKey, uniqueLetterCount),
+        newRequestId(),
+      );
+      if (effect.action === 'source') next = applyHintEffect(next, effect).state;
+    }
+  } catch {
+    return state;
+  }
+  return next;
 }
 
 export async function createLiveBundle(
@@ -117,35 +148,12 @@ export async function createLiveBundle(
     ? await fetchSolvedSummary(client, today.row.id, today.row.puzzle_date, today.counts.letterCount)
     : null;
   const api = createLiveApi(client, today.row.id, today.row.puzzle_date, today.counts.letterCount);
-  if (initial.attributionUnveiled && !initial.attribution) {
-    try {
-      const effect = await api.requestHint('unveil-attribution', {
-        mapping: initial.present,
-        revealedNumbers: initial.revealedNumbers,
-        attributionUnveiled: true,
-        cipherNumbers: cipherNumbersInWords(today.words),
-        hintLog: initial.hintLog,
-        hintsUsed: initial.hintsUsed,
-      });
-      if (effect.action === 'unveil') {
-        initial = {
-          ...initial,
-          attribution: effect.attribution,
-          hintsUsed: effect.hintsUsed,
-          hintLog: effect.hintLog,
-          attributionUnveiled: true,
-        };
-      }
-    } catch {
-      initial = { ...initial, attributionUnveiled: false };
-    }
-  }
+  initial = await restoreAttribution(api, initial, today.words, today.row.id, today.counts.uniqueLetterCount);
   return {
     key: today.row.id,
     mode: 'live',
     dateLabel: today.row.puzzle_date,
     words: today.words,
-    blurredAttribution: null,
     uniqueLetterCount: today.counts.uniqueLetterCount,
     letterCount: today.counts.letterCount,
     longestWord: today.counts.longestWord,
