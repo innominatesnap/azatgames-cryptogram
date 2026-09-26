@@ -5,6 +5,19 @@ import { readSupabaseConfig } from '../lib/config';
 import { createCryptogramClient } from '../lib/supabaseClient';
 import { createLiveBundle, createPracticeBundle, type PuzzleBundle } from './bundle';
 
+/** Dev-only stand-in when no database is configured. Same coded sample, live label, no second answer key. */
+export function previewBundle(bundle: PuzzleBundle, search: string): PuzzleBundle | null {
+  const query = search.charAt(0) === '?' ? search.slice(1) : search;
+  const params = new URLSearchParams(query);
+  if (params.get('preview') !== 'live') return null;
+  return {
+    ...bundle,
+    mode: 'live',
+    key: 'live-preview',
+    dateLabel: '2026-09-26',
+  };
+}
+
 export const STUB_NOTICE = 'Stub mode. Supabase is not configured, so this round uses a local sample quote.';
 
 type Store = {
@@ -24,6 +37,10 @@ export async function runBoot(storage: Store): Promise<BootResult> {
   const practice = createPracticeBundle(storage);
   const config = readSupabaseConfig(import.meta.env);
   if (!config.configured) {
+    if (import.meta.env.DEV && typeof window !== 'undefined') {
+      const preview = previewBundle(practice, window.location.search);
+      if (preview) return { bundle: preview, notice: null, signedIn: false };
+    }
     return { bundle: practice, notice: STUB_NOTICE, signedIn: false };
   }
   const client = createCryptogramClient(config.url, config.anonKey);

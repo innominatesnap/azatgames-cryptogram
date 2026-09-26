@@ -362,41 +362,47 @@ button.big-card:disabled {
   padding: 16px 14px 24px;
 }
 
-.editor-context {
-  color: var(--muted);
-  text-align: center;
-  min-height: 1.4em;
+.tile-current {
+  outline: 3px solid var(--gold);
+  outline-offset: 1px;
 }
 
-.editor-word {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
-  margin: 8px 0 14px;
+.keyboard-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  margin: 4px 0 16px;
+  padding: 10px 8px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: #17140f;
 }
 
-.editor-tile { min-width: 48px; min-height: 70px; }
-.editor-tile.tile-current { box-shadow: inset 0 0 0 3px var(--gold); }
-
-.key-row {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-bottom: 6px;
+.keyboard {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .key {
-  flex: 1 1 0;
-  max-width: 72px;
-  min-height: 56px;
+  width: 100%;
+  min-height: 64px;
   border-radius: 12px;
   border: 1px solid #4d4336;
   background: #2a241c;
   font-family: var(--serif);
-  font-size: 1.45rem;
+  font-size: 1.5rem;
+  touch-action: manipulation;
 }
 
+.key-delete {
+  margin-top: 8px;
+  min-height: 56px;
+  font-family: var(--sans);
+  font-size: 1.15rem;
+}
+
+.key:disabled { opacity: 0.4; }
 .key-used { opacity: 0.42; }
 .key-current { background: var(--gold); color: var(--gold-ink); border-color: var(--gold); }
 .key-crossed {
@@ -443,6 +449,12 @@ button.big-card:disabled {
   .pair { grid-template-columns: 1fr; }
   .big-card-title { font-size: 1.3rem; }
   .age-card .big-card-title { font-size: 1.7rem; }
+  .key { min-height: 64px; font-size: 1.55rem; }
+}
+
+@media (min-width: 720px) {
+  .keyboard { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .key { min-height: 56px; }
 }
 
 @media (prefers-color-scheme: light) {
@@ -480,7 +492,10 @@ button.big-card:disabled {
     border-color: #0e7c7c;
     box-shadow: inset 0 -4px 0 #0e7c7c;
   }
-  .key { background: #fffaf2; border-color: #cbbba2; color: var(--ink); }
+  .key, .keyboard-dock { background: #fffaf2; }
+  .key { border-color: #cbbba2; color: var(--ink); }
+  .key-current { background: var(--gold); color: var(--gold-ink); }
+  .keyboard-dock { border-color: var(--line); }
   .sheet { background: #fffaf2; }
   .alert { background: #fff1ea; }
   .bar-track { background: #efe4d2; }
