@@ -7,7 +7,20 @@
 -- Idempotent: create or replace / if not exists.
 --
 -- Do not re-apply 20260926120000_cryptogram_init.sql after this file.
--- Re-applying it would restore the old leave_household and join_household bodies.
+-- Re-applying it would restore the old leave_household and join_household bodies
+-- and grant execute on create_household, join_household, and leave_household
+-- back to authenticated.
+--
+-- Live lockdown, applied 9:24 AM MT 2026-09-26: EXECUTE on
+-- cryptogram.create_household(text), cryptogram.join_household(text), and
+-- cryptogram.leave_household(uuid) is revoked from authenticated, anon, and
+-- PUBLIC. This file does not grant those three to any browser role. After
+-- replacing join_household and leave_household it revokes all three again, so
+-- a re-apply cannot reopen them. is_household_member stays executable by
+-- authenticated because the RLS select policies call it.
+-- Security definer functions added or replaced here use search_path = ''
+-- and schema-qualified names (pg_catalog, auth, cryptogram). coalesce is SQL
+-- syntax, not a pg_catalog function, so it stays unqualified.
 --
 -- Today a deleted login cascades the host membership away and leaves the
 -- household with no host. leave_household used to promote the oldest other
@@ -44,7 +57,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
   -- When an is_18_plus flag exists, require it here too.
   -- Do not invent that column and do not query the hub for it.
@@ -65,7 +78,7 @@ returns boolean
 language plpgsql
 stable
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 declare
   v_member cryptogram.household_members;
@@ -86,11 +99,11 @@ create or replace function cryptogram.settle_household_host(p_household uuid)
 returns void
 language plpgsql
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 declare
-  v_current uuid;
-  v_next uuid;
+  v_current pg_catalog.uuid;
+  v_next pg_catalog.uuid;
 begin
   -- No members: the delete trigger removes the household. Do not touch it here.
   if not exists (
@@ -144,7 +157,7 @@ begin
     and role = 'host';
 
   update cryptogram.households
-  set frozen_at = coalesce(frozen_at, now()),
+  set frozen_at = coalesce(frozen_at, pg_catalog.now()),
       frozen_reason = coalesce(frozen_reason, 'no_eligible_host')
   where id = p_household;
 end;
@@ -155,20 +168,20 @@ create or replace function cryptogram.note_household_deleting()
 returns trigger
 language plpgsql
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 declare
-  deleting text;
+  deleting pg_catalog.text;
 begin
-  deleting := coalesce(current_setting('cryptogram.household_deleting', true), '');
+  deleting := coalesce(pg_catalog.current_setting('cryptogram.household_deleting', true), '');
   if deleting = '' then
     deleting := ',';
-  elsif right(deleting, 1) <> ',' then
+  elsif pg_catalog.right(deleting, 1) <> ',' then
     deleting := deleting || ',';
   end if;
-  perform set_config(
+  perform pg_catalog.set_config(
     'cryptogram.household_deleting',
-    deleting || old.id::text || ',',
+    deleting || old.id::pg_catalog.text || ',',
     true
   );
   return old;
@@ -179,12 +192,12 @@ create or replace function cryptogram.handle_deleted_member()
 returns trigger
 language plpgsql
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 begin
-  if position(
-    ',' || old.household_id::text || ','
-    in ',' || coalesce(current_setting('cryptogram.household_deleting', true), '') || ','
+  if pg_catalog.strpos(
+    ',' || coalesce(pg_catalog.current_setting('cryptogram.household_deleting', true), '') || ',',
+    ',' || old.household_id::pg_catalog.text || ','
   ) > 0 then
     return null;
   end if;
@@ -230,10 +243,10 @@ create or replace function cryptogram.leave_household(p_household uuid)
 returns void
 language plpgsql
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 declare
-  uid uuid := auth.uid();
+  uid pg_catalog.uuid := auth.uid();
 begin
   if uid is null then
     raise exception 'sign in required';
@@ -258,14 +271,14 @@ create or replace function cryptogram.join_household(p_code text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 declare
-  uid uuid := auth.uid();
-  hid uuid;
-  hname text;
-  frozen timestamptz;
-  existing_role text;
+  uid pg_catalog.uuid := auth.uid();
+  hid pg_catalog.uuid;
+  hname pg_catalog.text;
+  frozen pg_catalog.timestamptz;
+  existing_role pg_catalog.text;
 begin
   if uid is null then
     raise exception 'sign in required';
@@ -273,7 +286,7 @@ begin
   select h.id, h.name, h.frozen_at
   into hid, hname, frozen
   from cryptogram.households h
-  where h.invite_code = upper(btrim(p_code));
+  where h.invite_code = pg_catalog.upper(pg_catalog.btrim(p_code));
   if hid is null then
     raise exception 'invite code not found';
   end if;
@@ -289,7 +302,7 @@ begin
     from cryptogram.household_members m
     where m.household_id = hid
       and m.user_id = uid;
-    return jsonb_build_object('id', hid, 'name', hname, 'role', existing_role);
+    return pg_catalog.jsonb_build_object('id', hid, 'name', hname, 'role', existing_role);
   end if;
   if frozen is not null then
     raise exception 'invite code not found';
@@ -297,7 +310,7 @@ begin
   insert into cryptogram.household_members (household_id, user_id, role)
   values (hid, uid, 'member')
   on conflict (household_id, user_id) do nothing;
-  return jsonb_build_object('id', hid, 'name', hname, 'role', 'member');
+  return pg_catalog.jsonb_build_object('id', hid, 'name', hname, 'role', 'member');
 end;
 $fn$;
 
@@ -307,12 +320,12 @@ create or replace function cryptogram.require_household_host(p_household uuid)
 returns void
 language plpgsql
 security definer
-set search_path = pg_catalog
+set search_path = ''
 as $fn$
 declare
-  uid uuid := auth.uid();
-  v_frozen timestamptz;
-  v_role text;
+  uid pg_catalog.uuid := auth.uid();
+  v_frozen pg_catalog.timestamptz;
+  v_role pg_catalog.text;
 begin
   -- Every later host-only RPC must call cryptogram.require_household_host.
   if uid is null then
@@ -336,24 +349,27 @@ begin
 end;
 $fn$;
 
-revoke all on function cryptogram.member_can_host(cryptogram.household_members) from public, anon, authenticated;
-revoke all on function cryptogram.member_can_host(uuid, uuid) from public, anon, authenticated;
-revoke all on function cryptogram.settle_household_host(uuid) from public, anon, authenticated;
-revoke all on function cryptogram.require_household_host(uuid) from public, anon, authenticated;
-revoke all on function cryptogram.note_household_deleting() from public, anon, authenticated;
-revoke all on function cryptogram.handle_deleted_member() from public, anon, authenticated;
+-- New functions are executable by PUBLIC by default. Revoke that, and revoke
+-- anon and authenticated explicitly. No client grants for helpers.
+revoke execute on function cryptogram.member_can_host(cryptogram.household_members) from public, anon, authenticated;
+revoke execute on function cryptogram.member_can_host(uuid, uuid) from public, anon, authenticated;
+revoke execute on function cryptogram.settle_household_host(uuid) from public, anon, authenticated;
+revoke execute on function cryptogram.require_household_host(uuid) from public, anon, authenticated;
+revoke execute on function cryptogram.note_household_deleting() from public, anon, authenticated;
+revoke execute on function cryptogram.handle_deleted_member() from public, anon, authenticated;
 
 -- Login deletion runs as supabase_auth_admin and cascades into household_members.
--- The trigger functions have to be executable by that role and by service_role.
+-- These two are not browser roles. Nothing else is granted.
 grant execute on function cryptogram.note_household_deleting() to service_role, supabase_auth_admin;
 grant execute on function cryptogram.handle_deleted_member() to service_role, supabase_auth_admin;
 
--- create or replace keeps the existing authenticated grant. State it again so a
--- re-apply still ends with authenticated execute and no anon execute.
-revoke all on function cryptogram.leave_household(uuid) from public, anon, authenticated;
-revoke all on function cryptogram.join_household(text) from public, anon, authenticated;
-grant execute on function cryptogram.leave_household(uuid) to authenticated;
-grant execute on function cryptogram.join_household(text) to authenticated;
+-- Live lockdown: do not grant create/join/leave to any browser role.
+-- create or replace preserves privileges, so re-state the revoke after
+-- replacing join and leave. create_household is not replaced; revoke it too
+-- so a re-apply cannot reopen it. is_household_member is left alone.
+revoke execute on function cryptogram.create_household(text) from public, anon, authenticated;
+revoke execute on function cryptogram.join_household(text) from public, anon, authenticated;
+revoke execute on function cryptogram.leave_household(uuid) from public, anon, authenticated;
 
 -- Harmless when no households exist. Re-runs stay correct.
 do $settle$
@@ -405,19 +421,24 @@ where n.nspname = 'cryptogram'
   and p.prosrc like '%is_anonymous%'
   and p.prosrc like '%is_18_plus%';
 
--- PASS: anon_exec and authenticated_exec are false on every row.
--- service_role_exec and auth_admin_exec are true only for the two trigger functions.
+-- PASS: anon_exec, authenticated_exec, and public_exec are false on every row.
+-- That includes create/join/leave and the helpers. service_role_exec and
+-- auth_admin_exec are true only for the two trigger functions.
 select
   p.proname,
   pg_get_function_identity_arguments(p.oid) as args,
   has_function_privilege('anon', p.oid, 'execute') as anon_exec,
   has_function_privilege('authenticated', p.oid, 'execute') as authenticated_exec,
+  has_function_privilege('public', p.oid, 'execute') as public_exec,
   has_function_privilege('service_role', p.oid, 'execute') as service_role_exec,
   has_function_privilege('supabase_auth_admin', p.oid, 'execute') as auth_admin_exec
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'cryptogram'
   and p.proname in (
+    'create_household',
+    'join_household',
+    'leave_household',
     'member_can_host',
     'settle_household_host',
     'require_household_host',
@@ -426,16 +447,37 @@ where n.nspname = 'cryptogram'
   )
 order by p.proname, args;
 
--- PASS: three rows, authenticated_exec true, anon_exec false.
+-- PASS: one row, authenticated_exec true. RLS select policies call this.
+-- This file does not revoke it.
 select
   p.proname,
+  has_function_privilege('anon', p.oid, 'execute') as anon_exec,
   has_function_privilege('authenticated', p.oid, 'execute') as authenticated_exec,
-  has_function_privilege('anon', p.oid, 'execute') as anon_exec
+  has_function_privilege('public', p.oid, 'execute') as public_exec
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'cryptogram'
-  and p.proname in ('leave_household', 'join_household', 'create_household')
-order by p.proname;
+  and p.proname = 'is_household_member';
+
+-- PASS: eight rows, each proconfig exactly {search_path=""}.
+-- create_household is not replaced, so it is not in this list.
+select
+  p.proname,
+  pg_get_function_identity_arguments(p.oid) as args,
+  p.proconfig
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'cryptogram'
+  and p.proname in (
+    'join_household',
+    'leave_household',
+    'member_can_host',
+    'settle_household_host',
+    'require_household_host',
+    'handle_deleted_member',
+    'note_household_deleting'
+  )
+order by p.proname, args;
 
 -- PASS: household_members_after_delete_host, after delete for each row,
 -- executes cryptogram.handle_deleted_member().
@@ -450,8 +492,9 @@ where n.nspname = 'cryptogram'
 
 -- ---------------------------------------------------------------------------
 -- 3. Simulation. Inserts auth users and households, then rolls back.
--- This is not the live database. Safe to run in the same session as the apply:
--- the begin/rollback below does not undo the committed migration.
+-- Run this as postgres. create/join/leave are not granted to browser roles;
+-- the owner role still executes them here. This is not the live database.
+-- The begin/rollback below does not undo the committed migration.
 -- Every text[] append is cast ::text. A bare v_cols || 'email' fails with
 -- "malformed array literal".
 -- ---------------------------------------------------------------------------
