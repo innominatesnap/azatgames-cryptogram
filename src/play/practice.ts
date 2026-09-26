@@ -2,6 +2,7 @@ import { buildPuzzle, mulberry32, type Word } from '../engine/cipher';
 import { scoreSolve } from '../engine/scoring';
 import { isFilled, wrongLetterCount, wrongNumbers, type Mapping } from '../engine/solve';
 import { SAMPLE_AUTHOR, SAMPLE_NOTE, SAMPLE_PLAIN, SAMPLE_SEED, SAMPLE_WORK, SAMPLE_YEAR } from '../data/sample';
+import type { HintRecord } from '../hints/records';
 import type { ConfirmResult, QuoteInfo, SolveOutcome } from './api';
 
 export function sampleQuote(): QuoteInfo {
@@ -55,6 +56,7 @@ export function practiceConfirm(input: {
   longestWord: number;
   letterCount: number;
   dateLabel: string;
+  hintLog?: HintRecord[];
 }): ConfirmResult {
   const wrongCount = wrongLetterCount(input.words, input.mapping, input.solution);
   if (!isFilled(input.words, input.mapping) || wrongCount > 0) {
@@ -78,6 +80,7 @@ export function practiceConfirm(input: {
     quote: sampleQuote(),
     dateLabel: input.dateLabel,
     letterCount: input.letterCount,
+    hintLog: input.hintLog || [],
   };
   return { solved: true, outcome: outcome };
 }
@@ -87,6 +90,7 @@ export function practiceGiveUp(input: {
   hintsUsed: number;
   letterCount: number;
   dateLabel: string;
+  hintLog?: HintRecord[];
 }): SolveOutcome {
   return {
     solved: false,
@@ -98,5 +102,6 @@ export function practiceGiveUp(input: {
     quote: sampleQuote(),
     dateLabel: input.dateLabel,
     letterCount: input.letterCount,
+    hintLog: input.hintLog || [],
   };
 }

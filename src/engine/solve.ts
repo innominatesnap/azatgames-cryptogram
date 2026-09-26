@@ -1,4 +1,5 @@
 import type { Word } from './cipher';
+import type { Attribution, HintRecord } from '../hints/records';
 
 export type Mapping = { [number: number]: string };
 
@@ -7,8 +8,12 @@ export type SolveState = {
   present: Mapping;
   future: Mapping[];
   hintsUsed: number;
+  hintLog: HintRecord[];
   frequencyShown: boolean;
   revealedNumbers: number[];
+  revealedLetters: Mapping;
+  attributionUnveiled: boolean;
+  attribution: Attribution | null;
   gaveUp: boolean;
   elapsedMs: number;
 };
@@ -25,8 +30,12 @@ export function emptySolveState(): SolveState {
     present: emptyMapping(),
     future: [],
     hintsUsed: 0,
+    hintLog: [],
     frequencyShown: false,
     revealedNumbers: [],
+    revealedLetters: {},
+    attributionUnveiled: false,
+    attribution: null,
     gaveUp: false,
     elapsedMs: 0,
   };
@@ -136,38 +145,59 @@ function commit(state: SolveState, next: Mapping): SolveState {
   };
 }
 
+function restoreRevealed(state: SolveState): SolveState {
+  let present = state.present;
+  for (const key of Object.keys(state.revealedLetters)) {
+    const number = Number(key);
+    const letter = state.revealedLetters[number];
+    if (!letter || present[number] === letter) continue;
+    present = placeLetter(present, number, letter);
+  }
+  if (stableMapping(present) === stableMapping(state.present)) return state;
+  return { ...state, present: present };
+}
+
 export function setLetter(state: SolveState, number: number, letter: string): SolveState {
+  const upper = letter.toUpperCase();
+  if (state.revealedLetters[number]) return state;
+  const owner = letterOwner(state.present)[upper];
+  if (owner !== undefined && state.revealedLetters[owner]) return state;
   return commit(state, placeLetter(state.present, number, letter));
 }
 
 export function unsetNumber(state: SolveState, number: number): SolveState {
+  if (state.revealedLetters[number]) return state;
   return commit(state, clearNumber(state.present, number));
 }
 
 export function unsetNumbers(state: SolveState, numbers: number[]): SolveState {
-  return commit(state, clearNumbers(state.present, numbers));
+  const open: number[] = [];
+  for (const number of numbers) {
+    if (!state.revealedLetters[number]) open.push(number);
+  }
+  return commit(state, clearNumbers(state.present, open));
 }
 
 export function undo(state: SolveState): SolveState {
   if (!state.past.length) return state;
   const previous = state.past[state.past.length - 1];
-  return {
+  return restoreRevealed({
     ...state,
     past: state.past.slice(0, -1),
     present: copyMapping(previous),
     future: [copyMapping(state.present)].concat(state.future),
-  };
+  });
 }
 
 export function redo(state: SolveState): SolveState {
   if (!state.future.length) return state;
   const next = state.future[0];
-  return {
+  return restoreRevealed({
     ...state,
     past: state.past.concat([copyMapping(state.present)]),
     present: copyMapping(next),
     future: state.future.slice(1),
-  };
+  });
 }
 
 export function numbersInWord(word: Word): number[] {

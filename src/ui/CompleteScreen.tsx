@@ -3,6 +3,7 @@ import { codeNumberCounts } from '../engine/frequency';
 import { formatDuration } from '../engine/scoring';
 import type { Word } from '../engine/cipher';
 import type { SolveOutcome } from '../play/api';
+import { hintUsageLabel } from '../hints/registry';
 import { BigCard, ModeBanner, Shell, Wordmark } from './chrome';
 import { FrequencyBars } from './FrequencyBars';
 
@@ -29,7 +30,7 @@ export function CompleteScreen(props: {
       <div className="stack">
         <div className="big-card tone-gold">
           <div className="stars" aria-label={String(props.outcome.stars) + ' of 3 stars'}>{starRow(props.outcome.stars)}</div>
-          <p>{formatDuration(props.outcome.elapsedMs)} · {props.outcome.hintsUsed} hints · {props.outcome.points} points</p>
+          <p>{formatDuration(props.outcome.elapsedMs)} · {hintUsageLabel(props.outcome.hintsUsed, props.outcome.hintLog)} · {props.outcome.points} points</p>
         </div>
         <BigCard
           title={props.outcome.quote.author}
