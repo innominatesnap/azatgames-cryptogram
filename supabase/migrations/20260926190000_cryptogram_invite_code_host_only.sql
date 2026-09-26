@@ -1,8 +1,7 @@
 -- Invite code visible to hosts only.
 -- apply after merge, as postgres, one session. Never supabase db push. Do not re-apply older files.
+-- Apply AFTER 20260926180000_cryptogram_host_succession.sql (PR-CGM-8). If CGM-8 is applied later, re-run this file, which is idempotent.
 --
--- Apply after 20260926160000_cryptogram_hint_catalog.sql.
--- Do not depend on 20260926180000_cryptogram_host_succession.sql (PR-CGM-8).
 -- Target project: kfbgjpqgywenkfkfcoqf. A human applies this. The app does not.
 --
 -- Members can no longer SELECT cryptogram.households.invite_code. The only read
@@ -16,8 +15,8 @@
 -- SELECT on every current column except invite_code to authenticated.
 -- Table-level SELECT is what made select * include invite_code. Column
 -- privileges do not. PostgreSQL rejects SELECT * (and PostgREST's default
--- select=*) unless the role can read every column, so a client must list
--- id, name, and created_at. A view would be a second object the client has
+-- select=*) unless the role can read every column, so a client must name
+-- the columns it reads. A view would be a second object the client has
 -- to switch to. A secrets table would move the column and rewrite
 -- create_household and join_household. Neither is needed: no client reads
 -- households today.
@@ -127,30 +126,42 @@ revoke execute on function cryptogram.leave_household(uuid) from public, anon, a
 grant execute on function cryptogram.is_household_member(uuid) to authenticated;
 
 revoke select on table cryptogram.households from public, anon, authenticated;
+revoke select (invite_code) on table cryptogram.households from public, anon, authenticated;
 
+-- Grant whatever columns exist at apply time, one GRANT per column.
+-- information_schema.columns hides dropped columns; pg_attribute is used so
+-- attisdropped is an explicit filter. invite_code is skipped.
+-- Documented fallback, only if that loop finds nothing (it should not):
+--   grant select (id, name, created_at) on table cryptogram.households to authenticated;
+-- Do not use that list when frozen_at or frozen_reason exist. Re-run this
+-- file after those columns are added so the loop grants them too.
 do $grant$
 declare
-  v_cols text;
+  col record;
+  v_granted integer := 0;
 begin
-  select pg_catalog.string_agg(pg_catalog.format('%I', a.attname), ', ' order by a.attnum)
-  into v_cols
-  from pg_catalog.pg_attribute a
-  join pg_catalog.pg_class c on c.oid = a.attrelid
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'cryptogram'
-    and c.relname = 'households'
-    and a.attnum > 0
-    and not a.attisdropped
-    and a.attname <> 'invite_code';
+  for col in
+    select a.attname as column_name
+    from pg_catalog.pg_attribute a
+    join pg_catalog.pg_class c on c.oid = a.attrelid
+    join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'cryptogram'
+      and c.relname = 'households'
+      and a.attnum > 0
+      and not a.attisdropped
+      and a.attname <> 'invite_code'
+    order by a.attnum
+  loop
+    execute format(
+      'grant select (%I) on table cryptogram.households to authenticated',
+      col.column_name
+    );
+    v_granted := v_granted + 1;
+  end loop;
 
-  if v_cols is null or v_cols = '' then
+  if v_granted = 0 then
     raise exception 'households has no columns to grant';
   end if;
-
-  execute format(
-    'grant select (%s) on table cryptogram.households to authenticated',
-    v_cols
-  );
 end;
 $grant$;
 
@@ -174,7 +185,8 @@ commit;
 -- 2. Read-only verify
 -- ---------------------------------------------------------------------------
 
--- PASS: invite_code is false. Every other column is true.
+-- PASS: invite_code is false. Every other households column is true,
+-- including frozen_at and frozen_reason when PR-CGM-8 has already added them.
 select
   a.attname,
   has_column_privilege('authenticated', 'cryptogram.households', a.attname, 'SELECT') as authenticated_select
@@ -186,6 +198,24 @@ where n.nspname = 'cryptogram'
   and a.attnum > 0
   and not a.attisdropped
 order by a.attnum;
+
+-- PASS: other_columns_missing is 0. invite_code_select is false.
+select
+  count(*) filter (
+    where a.attname <> 'invite_code'
+      and not has_column_privilege('authenticated', 'cryptogram.households', a.attname, 'SELECT')
+  ) as other_columns_missing,
+  coalesce(bool_or(
+    a.attname = 'invite_code'
+    and has_column_privilege('authenticated', 'cryptogram.households', a.attname, 'SELECT')
+  ), false) as invite_code_select
+from pg_catalog.pg_attribute a
+join pg_catalog.pg_class c on c.oid = a.attrelid
+join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'cryptogram'
+  and c.relname = 'households'
+  and a.attnum > 0
+  and not a.attisdropped;
 
 -- PASS: false. Column grants are not a table-level SELECT.
 select has_table_privilege('authenticated', 'cryptogram.households', 'SELECT') as authenticated_table_select;
@@ -386,6 +416,7 @@ declare
   v_name text;
   v_created timestamptz;
   v_refused boolean;
+  v_had_frozen boolean;
   v_row cryptogram.households%rowtype;
 begin
   v_host := pg_temp.seed_auth_user('cgm-invite-host@example.test');
@@ -482,7 +513,22 @@ begin
 
   execute 'reset role';
 
-  alter table cryptogram.households add column frozen_at timestamptz;
+  select exists (
+    select 1
+    from pg_catalog.pg_attribute a
+    join pg_catalog.pg_class c on c.oid = a.attrelid
+    join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'cryptogram'
+      and c.relname = 'households'
+      and a.attname = 'frozen_at'
+      and a.attnum > 0
+      and not a.attisdropped
+  )
+  into v_had_frozen;
+
+  if not coalesce(v_had_frozen, false) then
+    alter table cryptogram.households add column frozen_at timestamptz;
+  end if;
   update cryptogram.households set frozen_at = pg_catalog.now() where id = v_hid;
 
   execute 'set local role authenticated';
@@ -510,7 +556,9 @@ begin
   end if;
 
   execute 'reset role';
-  alter table cryptogram.households drop column frozen_at;
+  if not coalesce(v_had_frozen, false) then
+    alter table cryptogram.households drop column frozen_at;
+  end if;
 
   raise notice 'VERIFY PASS invite code host only';
 end;
