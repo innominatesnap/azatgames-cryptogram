@@ -6,7 +6,7 @@ function projectFile(name: string): string {
   return fileURLToPath(new URL(name, import.meta.url));
 }
 
-// Landing at `/` and the game entry at `/play`. PR-CGM-1 replaces play/index.html.
+// Landing page entry at / and the game entry at /play.
 export default defineConfig({
   plugins: [
     react(),
@@ -20,6 +20,10 @@ export default defineConfig({
       },
     },
   ],
+  server: {
+    host: "0.0.0.0",
+    port: 5173,
+  },
   build: {
     rollupOptions: {
       input: {
@@ -38,10 +42,15 @@ function rewritePlayIndex(
   _res: unknown,
   next: () => void,
 ): void {
-  const path = req.url?.split("?")[0];
-  if (path === "/play" || path === "/play/") {
-    const query = req.url?.includes("?") ? `?${req.url.split("?")[1]}` : "";
-    req.url = `/play/index.html${query}`;
+  const raw = req.url || "";
+  const queryIndex = raw.indexOf("?");
+  const path = queryIndex === -1 ? raw : raw.slice(0, queryIndex);
+  const query = queryIndex === -1 ? "" : raw.slice(queryIndex);
+  const onPlay = path === "/play" || path.indexOf("/play/") === 0;
+  const leaf = path.slice(path.lastIndexOf("/") + 1);
+  const isFile = leaf.indexOf(".") !== -1;
+  if (onPlay && !isFile) {
+    req.url = "/play/index.html" + query;
   }
   next();
 }
