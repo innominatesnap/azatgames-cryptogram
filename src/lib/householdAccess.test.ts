@@ -57,6 +57,7 @@ describe('household invite code', () => {
       hashes.set(name, digest);
     }
     expect(hashes.has('20260926190000_cryptogram_invite_code_host_only.sql')).toBe(true);
-    expect(hashes.size).toBe(4);
+    expect(hashes.has('20261013210000_cryptogram_race_adapter.sql')).toBe(true);
+    expect(hashes.size).toBe(6);
   });
 });
