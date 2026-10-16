@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { APP_VERSION, GIT_SHA } from '../lib/buildInfo';
 
 export function BigCard(props: {
   title: string;
@@ -55,5 +56,12 @@ export function Wordmark(props: { subtitle: string }) {
 }
 
 export function Shell(props: { children: ReactNode }) {
-  return <main className="app-shell">{props.children}</main>;
+  return (
+    <main className="app-shell">
+      {props.children}
+      <p className="build-version fine" title={GIT_SHA || undefined}>
+        CryptoGram v{APP_VERSION}
+      </p>
+    </main>
+  );
 }
