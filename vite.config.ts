@@ -8,6 +8,11 @@ function projectFile(name: string): string {
 
 // Landing page entry at / and the game entry at /play.
 export default defineConfig({
+  define: {
+    // Short commit SHA of this build, read by src/lib/buildInfo.ts. See
+    // docs/VERSIONING.md.
+    __GIT_SHA__: JSON.stringify((process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7)),
+  },
   plugins: [
     react(),
     {

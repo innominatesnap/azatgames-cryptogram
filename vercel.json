@@ -2,6 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "ignoreCommand": "bash scripts/vercel-ignore.sh",
   "rewrites": [
     { "source": "/play", "destination": "/play/index.html" },
     { "source": "/play/(.*)", "destination": "/play/index.html" }

@@ -36,6 +36,11 @@ button { cursor: pointer; }
   padding: 20px 16px 48px;
 }
 
+.build-version {
+  margin-top: 24px;
+  text-align: center;
+}
+
 .wordmark {
   display: flex;
   justify-content: space-between;

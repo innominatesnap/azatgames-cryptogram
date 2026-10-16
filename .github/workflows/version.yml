@@ -1,0 +1,70 @@
+name: Version bump
+
+# The ONLY thing that changes the app version. See docs/VERSIONING.md.
+# Copied from azattechpoker's .github/workflows/version.yml (same policy,
+# shared across Azat products). On every push to main that isn't itself a
+# release commit:
+#   1. bump src/app-version.json + package.json (patch by default; the merged
+#      PR's `version:minor` / `version:major` label picks a bigger bump),
+#   2. commit "chore(release): vX.Y.Z" back to main,
+#   3. tag that commit vX.Y.Z.
+# Vercel skips the production build of the merge commit and builds the
+# release commit instead (scripts/vercel-ignore.sh), so the live footer
+# version label always equals the tag.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "patch | minor | major"
+        default: patch
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Pick bump level
+        id: level
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          level="${{ github.event.inputs.bump }}"
+          if [ -z "$level" ]; then
+            labels=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].labels[].name' 2>/dev/null || true)
+            level=patch
+            echo "$labels" | grep -qx 'version:minor' && level=minor
+            echo "$labels" | grep -qx 'version:major' && level=major
+          fi
+          echo "level=$level" >> "$GITHUB_OUTPUT"
+      - name: Bump, commit, tag
+        run: |
+          git config user.name "innominatesnap"
+          git config user.email "36549727+innominatesnap@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch origin main --tags && git reset --hard origin/main
+            v=$(node scripts/bump-version.mjs "${{ steps.level.outputs.level }}")
+            git add src/app-version.json package.json
+            git commit -m "chore(release): v$v" -m "Automated by .github/workflows/version.yml for ${{ github.sha }}"
+            git tag "v$v"
+            if git push origin HEAD:main && git push origin "v$v"; then
+              echo "Released v$v"; exit 0
+            fi
+            git tag -d "v$v"
+            sleep $((attempt * 5))
+          done
+          exit 1
