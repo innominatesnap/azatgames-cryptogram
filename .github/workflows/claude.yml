@@ -1,0 +1,53 @@
+name: Claude Code
+
+# Event-driven pickup: a comment/issue containing @claude starts a run now.
+# This replaces polling Claude on a timer / cloud routine.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    # Stays quiet when the text carries a Route: line or the Issue has a repo:<name> label.
+    # Those go to the doorbell router (doorbell-router.yml), which rings the target repo's own doorbell.
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, 'Route:') && !contains(join(github.event.issue.labels.*.name, ' '), 'repo:')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && !contains(github.event.issue.body, 'Route:') && !contains(join(github.event.issue.labels.*.name, ' '), 'repo:'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # GrokBots comments are often classified as bot actors. Default is deny-all bots.
+          allowed_bots: "*"
+          # This job's GitHub token covers this repo only, and the action's default tool
+          # allowlist is file tools plus git add/commit/push. Add read-only git and gh so a
+          # run can check Issue, PR and run state, and say plainly when work belongs elsewhere
+          # instead of trying git ls-remote / gh repo against other repos and being denied.
+          # Cross-repo, Supabase and Vercel work goes to the local broker.
+          claude_args: |
+            --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh run view:*),Bash(gh run list:*)"
+            --append-system-prompt "Scope: this job runs on the azatgames-cryptogram repo only. Its token and tool allowlist cannot reach other repos, Supabase or Vercel. If the work belongs in another repo, do not try git clone, git ls-remote or gh repo. Post one hand-off comment for the local broker (target repo, ordered steps, the status block, Needs from Timothy) and stop."
+          # Optional: trigger_phrase: "@claude"
