@@ -7,8 +7,10 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  # opened only: an Issue created with an assignee fires opened AND assigned with the same
+  # @claude body, which would start two runs. Re-ring with a new @claude comment instead.
   issues:
-    types: [opened, assigned]
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
@@ -22,6 +24,12 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && !contains(github.event.issue.body, 'Route:') && !contains(join(github.event.issue.labels.*.name, ' '), 'repo:'))
     runs-on: ubuntu-latest
+    # One Claude run per Issue/PR at a time: a second ring queues behind the first instead of
+    # running in parallel. Job-level (not workflow-level) so skipped runs, e.g. comments without
+    # the mention, never take the slot or replace a queued real run.
+    concurrency:
+      group: claude-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
