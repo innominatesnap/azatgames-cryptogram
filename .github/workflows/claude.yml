@@ -40,7 +40,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          fetch-depth: 0  # full history + all remote branches so Claude can resume its own claude/* branches
 
       - name: Run Claude Code
         id: claude
@@ -56,6 +56,6 @@ jobs:
           # instead of trying git ls-remote / gh repo against other repos and being denied.
           # Cross-repo, Supabase and Vercel work goes to the local broker.
           claude_args: |
-            --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh run view:*),Bash(gh run list:*)"
+            --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git fetch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git pull:*),Bash(git merge:*),Bash(git rev-parse:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh run view:*),Bash(gh run list:*)"
             --append-system-prompt "Scope: this job runs on the azatgames-cryptogram repo only. Its token and tool allowlist cannot reach other repos, Supabase or Vercel. If the work belongs in another repo, do not try git clone, git ls-remote or gh repo. Post one hand-off comment for the local broker (target repo, ordered steps, the status block, Needs from Timothy) and stop."
           # Optional: trigger_phrase: "@claude"
